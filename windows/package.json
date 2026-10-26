@@ -1,0 +1,82 @@
+{
+  "name": "lawdesk-desktop",
+  "productName": "律台",
+  "version": "0.2.0",
+  "description": "律台 · 本地法律智能体（Windows 客户端）",
+  "author": "245678000000",
+  "license": "MIT",
+  "homepage": "https://github.com/245678000000/lawdesk",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "node build.mjs"
+  },
+  "build": {
+    "appId": "local.lawdesk.app",
+    "productName": "律台",
+    "executableName": "LawDesk",
+    "artifactName": "LawDesk-Setup-${version}-${arch}.${ext}",
+    "copyright": "MIT License",
+    "directories": {
+      "output": "../dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../server.js",
+        "to": "server/server.js"
+      },
+      {
+        "from": "../package.json",
+        "to": "server/package.json"
+      },
+      {
+        "from": "../lib",
+        "to": "server/lib"
+      },
+      {
+        "from": "../public",
+        "to": "server/public"
+      },
+      {
+        "from": "../LICENSE",
+        "to": "LICENSE.txt"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "律台",
+      "uninstallDisplayName": "律台",
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "language": "2052",
+      "license": "../LICENSE"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  }
+}

@@ -79,8 +79,13 @@ async function api(path, { method = 'GET', body } = {}) {
 }
 
 // Mac 客户端（WKWebView）里注入的原生桥，浏览器里不存在
-const nativeBridge = window.webkit?.messageHandlers?.lawdesk;
-if (nativeBridge) document.documentElement.classList.add('mac-app');
+// 桌面客户端注入的原生能力：Mac 版是 WKWebView 的 messageHandler，Windows 版是 Electron preload
+const macBridge = window.webkit?.messageHandlers?.lawdesk;
+const native = window.lawdeskNative ||
+  (macBridge && { pickFolder: () => macBridge.postMessage({ type: 'pickFolder' }) });
+if (macBridge) document.documentElement.classList.add('mac-app');
+if (window.lawdeskNative) document.documentElement.classList.add('desktop-app');
+const fileManager = () => (S.data?.platform === 'win32' ? '资源管理器' : '访达');
 
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch {}
@@ -324,7 +329,7 @@ function composerHTML(placeholder) {
       ${S.route.view === 'chat' ? `<button class="pick" data-act="skill-menu">${icon('wand')}技能</button>` : ''}
       <div class="grow"></div>
       <span id="pickers">${pickersHTML()}</span>
-      <button class="icon-btn mic${recognizing ? ' on' : ''}" data-act="mic" title="语音输入"${SpeechRec ? '' : ' hidden'}>${icon('mic')}</button>
+      <button class="icon-btn mic${recognizing ? ' on' : ''}${SpeechRec ? '' : ' hidden'}" data-act="mic" title="语音输入">${icon('mic')}</button>
       <button class="send-btn" id="send-btn" data-act="send">${icon('up')}</button>
     </div>
   </div>`;
@@ -454,7 +459,8 @@ async function uploadFiles(items) {
 }
 
 // 语音输入（浏览器支持时）
-const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+// Electron 里虽然有这个接口但没有可用的识别服务，桌面客户端里不显示语音按钮
+const SpeechRec = window.lawdeskNative ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognizing = null;
 function toggleMic() {
   if (recognizing) { recognizing.stop(); return; }
@@ -766,7 +772,7 @@ function projectHTML() {
   const convs = S.data.conversations.filter((c) => c.projectId === p.id && c.count > 0);
   return `<div class="home"><div class="home-spacer" style="max-height:18vh"></div>
     <div class="project-head"><h1>${esc(p.name)}</h1>
-      <div class="meta">${p.folder ? `<span class="mono-path">${esc(p.folder)}</span><button data-act="reveal-project" data-id="${p.id}">在访达中打开</button>` : '<span>未关联文件夹</span>'}
+      <div class="meta">${p.folder ? `<span class="mono-path">${esc(p.folder)}</span><button data-act="reveal-project" data-id="${p.id}">在${fileManager()}中打开</button>` : '<span>未关联文件夹</span>'}
       <button data-act="edit-project" data-id="${p.id}">编辑项目</button></div>
       ${p.instructions ? `<div class="meta" style="margin-top:6px">项目说明：${esc(p.instructions.slice(0, 120))}</div>` : ''}
     </div>
@@ -807,7 +813,7 @@ function filesPanelHTML() {
   const row = (f) => `<div class="file-row">${icon('doc')}<a class="n" href="/files/${S.conv.id}/${encodeURI(f.path)}" target="_blank" title="${esc(f.path)}">${esc(f.path.split('/').slice(1).join('/') || f.path)}</a>
     <span class="s">${size(f.size)}</span><a class="icon-btn dl" href="/files/${S.conv.id}/${encodeURI(f.path)}?download" title="下载">${icon('download')}</a></div>`;
   return `<div class="files-panel">
-    <div class="btn-row" style="margin-bottom:14px"><button class="btn small" data-act="reveal-ws">${icon('folder')}在访达中打开</button>
+    <div class="btn-row" style="margin-bottom:14px"><button class="btn small" data-act="reveal-ws">${icon('folder')}在${fileManager()}中打开</button>
       <button class="btn small" data-act="refresh-files">${icon('refresh')}刷新</button></div>
     ${Object.entries(groups).map(([name, list]) => (name === '其他' && !list.length) ? '' : `<h4>${name === '输出' ? '智能体生成' : name === '附件' ? '上传的材料' : name}</h4>
       ${list.map(row).join('') || `<div class="files-empty">${name === '输出' ? '使用 Claude Code / Codex 时，生成的报告和文书会出现在这里' : '暂无'}</div>`}`).join('')}
@@ -995,8 +1001,8 @@ function openProjectModal(p) {
   m.onAction = async (act, form, root) => {
     if (act === 'cancel') return m.close();
     if (act === 'pick') {
-      const r = nativeBridge
-        ? { path: await nativeBridge.postMessage({ type: 'pickFolder' }).catch(() => null) }
+      const r = native
+        ? { path: await native.pickFolder().catch(() => null) }
         : await api('/api/pick-folder', { method: 'POST' });
       if (r.unsupported) return toast('当前系统不支持弹窗选择，请直接填写路径');
       if (r.path) root.querySelector('[name=folder]').value = r.path;

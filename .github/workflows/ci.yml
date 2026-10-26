@@ -1,0 +1,66 @@
+name: 测试与打包
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: 冒烟测试（${{ matrix.os }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # 用 npm 全局安装两个 CLI：在 Windows 上会生成 .cmd 包装脚本，正好验证检测和调用逻辑
+      - name: 安装 Claude Code 与 Codex CLI
+        run: npm install -g @anthropic-ai/claude-code @openai/codex
+      - name: 冒烟测试
+        run: npm test
+        env:
+          EXPECT_CLIS: '1'
+          TEST_CLI_CALLS: '1'
+
+  windows:
+    name: Windows 安装包
+    needs: smoke
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+      - name: 安装打包工具
+        run: npm ci
+        working-directory: windows
+      - name: 打包
+        run: npm run dist
+        working-directory: windows
+      - name: 静默安装并启动安装后的 App 做端到端测试
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist/LawDesk-Setup-*.exe).FullName
+          Start-Process -FilePath $setup -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter LawDesk.exe | Select-Object -First 1
+          if (-not $exe) { throw '安装后没有找到 LawDesk.exe' }
+          Write-Host "已安装到 $($exe.FullName)"
+          node test/e2e-desktop.mjs $exe.FullName --shot dist/screenshot-windows.png
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LawDesk-windows-x64
+          path: |
+            dist/LawDesk-Setup-*.exe
+            dist/screenshot-windows.png
+          if-no-files-found: ignore

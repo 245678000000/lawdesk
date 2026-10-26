@@ -283,7 +283,7 @@ async function handleApi(req, res, url) {
     const projects = store.getProjects();
     return send(res, 200, {
       config: store.publicConfig(), clis: CLIS, skills: store.getSkills(), examples: EXAMPLES,
-      projects, memory: store.getMemory(), dataDir: store.DATA_DIR,
+      projects, memory: store.getMemory(), dataDir: store.DATA_DIR, platform: process.platform,
       conversations: store.listConversations().map((c) => ({ ...c, running: running.has(c.id) })),
     });
   }

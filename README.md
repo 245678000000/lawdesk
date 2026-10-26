@@ -1,19 +1,26 @@
 # 律台 · 本地法律智能体
 
+[![测试与打包](https://github.com/245678000000/lawdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/245678000000/lawdesk/actions/workflows/ci.yml)
+
 一个跑在自己电脑上的法律 Agent 工作台：合同审查、案例研究、事实分析、案件时间线、文书起草……
 
 - **不需要登录**：没有账号体系，只监听 `127.0.0.1`
 - **模型用你自己的**：本机已装好的 Claude Code / Codex 命令行，或者你自己的 API Key（DeepSeek、Kimi、通义、OpenAI、Anthropic、Ollama 等）
 - **数据全在本地**：对话、上传的材料、生成的文件都在你自己的电脑上
-- **零依赖**：Node.js 原生实现，没有 npm 包；另有 Mac 客户端
+- **零依赖**：Node.js 原生实现，没有 npm 包；另有 Mac 和 Windows 客户端
 
 ![律台界面](docs/screenshot.jpg)
 
-## 下载 Mac 客户端
+## 下载客户端
 
-到 [Releases](../../releases) 下载 `LawDesk-<版本>-arm64.dmg`（Apple 芯片），打开后把「律台」拖进「应用程序」。
+到 [Releases](../../releases) 下载：
 
-App 没有经过 Apple 公证，第一次打开时请在「访达」里右键 →「打开」，或到「系统设置 → 隐私与安全性」点「仍要打开」。
+| 系统 | 文件 | 安装 |
+|---|---|---|
+| macOS（Apple 芯片） | `LawDesk-<版本>-arm64.dmg` | 打开后把「律台」拖进「应用程序」。App 没有经过 Apple 公证，第一次打开请在访达里右键 →「打开」 |
+| Windows 10 / 11（x64） | `LawDesk-Setup-<版本>-x64.exe` | 双击安装。安装包没有代码签名，如果出现「Windows 已保护你的电脑」，点「更多信息 → 仍要运行」 |
+
+使用 Claude Code / Codex 之前，先在终端（Windows 上是 PowerShell）里确认 `claude`、`codex` 能正常对话。
 
 ## 从源码运行
 
@@ -40,6 +47,22 @@ npm start
 - App 是自签名的，没有经过 Apple 公证。
 - 安装包内置 Node.js 运行时，其许可证见 `mac/NODE_LICENSE`（也会复制到 App 内）。
 
+## Windows 客户端说明
+
+`windows/` 是 Electron 外壳：用 Electron 自带的 Node 在后台运行同一套 `server.js`，窗口加载本地页面。
+
+```bash
+cd windows
+npm install
+npm start        # 开发运行（macOS / Windows 都可以）
+npm run dist     # 打包出 dist/LawDesk-Setup-<版本>-x64.exe（在 macOS 上也能打 Windows 包）
+```
+
+- 数据保存在 `%APPDATA%\LawDesk`（菜单「文件 → 打开数据文件夹」），日志在 `%APPDATA%\LawDesk\logs\server.log`。
+- 会自动找到 npm 全局安装的 `claude.cmd`、`codex.cmd` 和原生安装的 `claude.exe`；`.cmd` 包装脚本会解析成 `node <脚本>` 直接运行，避免长提示词经过 cmd.exe 转义出错。
+- 关闭窗口时，后台服务和正在运行的 claude / codex 进程会一并结束。
+- 每次推送都会在 GitHub Actions 的 Windows、macOS、Linux 上跑冒烟测试，并在 Windows 上打包、静默安装、启动安装后的 App 做端到端测试（`test/`）。
+
 ## 三种模型来源
 
 | 来源 | 能力 | 用到的命令 / 接口 |
@@ -65,7 +88,7 @@ npm start
 ## 功能
 
 - **技能**：合同审查、案例研究、事实分析、案件大事记、案件时间线、案件思维导图、文书起草、法规检索、风险评估。每个技能是一段追加到系统提示里的工作方法，可在「技能」页改写或新建。
-- **项目**：可以关联一个本机案卷文件夹（可点「选择…」弹出访达选择），项目里的对话会把它当作工作目录，智能体直接读取全部材料；还可以写项目说明（立场、管辖法院等）。
+- **项目**：可以关联一个本机案卷文件夹（可点「选择…」弹出系统的文件夹选择框），项目里的对话会把它当作工作目录，智能体直接读取全部材料；还可以写项目说明（立场、管辖法院等）。
 - **我的记忆**：执业身份、文书偏好等长期信息，每次任务都会带上。
 - **工作区文件**：每个对话有自己的工作区，`附件/` 是上传的材料，`输出/` 是智能体生成的报告、文书、时间线 HTML，点右上角「工作区文件」查看或下载。
 - 上传支持点选文件、整个文件夹、拖拽、粘贴；时间线和思维导图里的 mermaid 图会自动渲染（需要能访问 jsdelivr，离线时显示代码）。
@@ -82,7 +105,9 @@ lib/store.js       data/ 下的 JSON 存储
 lib/extract.js     API 模式下的附件转文字（textutil、pdftotext）
 public/            前端（原生 JS，无构建步骤）
 mac/               Mac 客户端：main.swift（窗口外壳）、make-icon.swift（图标）、build.sh（打包 dmg）
-dist/              打包产物：律台.app、律台.dmg
+windows/           Windows 客户端：main.cjs / preload.cjs（Electron 外壳）、build.mjs（打包安装包）
+test/              smoke.mjs（服务冒烟测试，npm test）、e2e-desktop.mjs（桌面客户端端到端测试）
+dist/              打包产物：律台.app、*.dmg、*.exe
 data/              运行后生成：config.json、conversations/、workspaces/、memory.md
 ```
 
