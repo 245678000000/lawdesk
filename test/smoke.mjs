@@ -89,6 +89,25 @@ async function chat(body, timeoutMs = 120000) {
 
 let failed = false;
 try {
+  // 0. Windows .cmd 包装脚本解析（纯字符串解析，各平台都跑）
+  const { shimTarget } = await import('../lib/cli.js');
+  const shimDir = path.join(os.tmpdir(), 'npm-prefix');
+  const head = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n';
+  const shims = {
+    'npm → js': [head + 'IF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n) ELSE (\r\n  SET "_prog=node"\r\n)\r\n' +
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n',
+      'node_modules/@openai/codex/bin/codex.js'],
+    'npm → exe': [head + '"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*\r\n',
+      'node_modules/@anthropic-ai/claude-code/bin/claude.exe'],
+    'pnpm → js': ['@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe"  "%~dp0\\..\\@anthropic-ai\\claude-code\\cli.js" %*\r\n) ELSE (\r\n  node  "%~dp0\\..\\@anthropic-ai\\claude-code\\cli.js" %*\r\n)\r\n',
+      '@anthropic-ai/claude-code/cli.js'],
+  };
+  for (const [kind, [text, want]] of Object.entries(shims)) {
+    const got = shimTarget(path.join(shimDir, 'x.cmd'), text).replace(/\\/g, '/');
+    assert.ok(got.endsWith(want), `${kind}：解析结果 ${got} 应以 ${want} 结尾`);
+  }
+  log('.cmd 包装脚本解析：通过');
+
   // 1. 状态与 CLI 检测
   const state = await api('/api/state');
   assert.equal(state.platform, process.platform);
