@@ -1,0 +1,13 @@
+{
+  "name": "lawdesk-local",
+  "version": "0.1.0",
+  "description": "本地法律智能体：无需登录，接入本机 Claude Code / Codex CLI 或自有 API",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
