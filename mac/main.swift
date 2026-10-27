@@ -195,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
     let appItem = NSMenuItem()
     let appMenu = NSMenu()
     appMenu.addItem(withTitle: "关于\(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+    appMenu.addItem(withTitle: "检查更新…", action: #selector(checkUpdate), keyEquivalent: "")
     appMenu.addItem(.separator())
     appMenu.addItem(withTitle: "模型与连接…", action: #selector(openSettings), keyEquivalent: ",")
     appMenu.addItem(.separator())
@@ -260,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
   @objc func showMainWindow() { window.makeKeyAndOrderFront(nil) }
   @objc func newChat() { showMainWindow(); webView.evaluateJavaScript("location.hash = '#/'") }
   @objc func openSettings() { showMainWindow(); webView.evaluateJavaScript("location.hash = '#/settings'") }
+  @objc func checkUpdate() { showMainWindow(); webView.evaluateJavaScript("window.lawdeskCheckUpdate && window.lawdeskCheckUpdate()") }
   @objc func openDataFolder() { NSWorkspace.shared.open(supportDir) }
   @objc func openLog() { NSWorkspace.shared.open(logURL) }
   @objc func reloadPage() {

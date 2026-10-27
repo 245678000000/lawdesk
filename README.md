@@ -109,6 +109,7 @@ npm run dist     # 打包出 dist/LawDesk-Setup-<版本>-x64.exe（在 macOS 上
 - **工作区文件**：每个对话有自己的工作区，`附件/` 是上传的材料，`输出/` 是智能体生成的报告、文书、时间线 HTML，点右上角「工作区文件」查看或下载。
 - 上传支持点选文件、整个文件夹、拖拽、粘贴；时间线和思维导图里的 mermaid 图会自动渲染（需要能访问 jsdelivr，离线时显示代码）。
 - 切换模型来源后会把之前的对话记录带给新的模型；同一来源连续对话会续接 CLI 会话（`--resume` / `codex exec resume`）。
+- **检查更新**：启动时自动查询 GitHub 上的最新版本（每天最多一次，可在「模型与连接 → 版本与更新」里关闭），有新版本时侧栏底部会提示，点开可看更新说明并下载对应系统的安装包；客户端菜单里也有「检查更新…」。只查询版本号，不上传任何对话、文件或配置。源码运行的话用 `git pull` 更新。
 
 ## 目录
 
@@ -119,12 +120,13 @@ lib/api.js         OpenAI 兼容 / Anthropic 接口
 lib/skills.js      内置技能、首页示例
 lib/store.js       data/ 下的 JSON 存储
 lib/extract.js     API 模式下的附件转文字（textutil、pdftotext）
+lib/update.js      检查更新（查询 GitHub 最新发布版本）
 public/            前端（原生 JS，无构建步骤）
 mac/               Mac 客户端：main.swift（窗口外壳）、make-icon.swift（图标）、build.sh（打包 dmg）
 windows/           Windows 客户端：main.cjs / preload.cjs（Electron 外壳）、build.mjs（打包安装包）
 test/              smoke.mjs（服务冒烟测试，npm test）、e2e-desktop.mjs（桌面客户端端到端测试）
 dist/              打包产物：律台.app、*.dmg、*.exe
-data/              运行后生成：config.json、conversations/、workspaces/、memory.md
+data/              运行后生成：config.json、conversations/、workspaces/、memory.md、update.json
 ```
 
 ## 注意

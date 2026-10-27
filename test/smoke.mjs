@@ -1,6 +1,7 @@
 // 冒烟测试：npm test
 // 启动本地服务（独立的临时数据目录），检查：CLI 检测、Word 附件上传与转文字、自有 API 流式对话、
-// 文件下载，以及本机装了 claude / codex 时能否真正把它们拉起来（不要求已登录，只要求没有启动错误）。
+// 文件下载、检查更新（模拟 GitHub 接口），以及本机装了 claude / codex 时能否真正把它们拉起来
+// （不要求已登录，只要求没有启动错误）。
 // 设置 EXPECT_CLIS=claude,codex,codebuddy 时要求这些命令都能检测到（CI 里会先用 npm 全局安装它们）；
 // 设置 EXPECT_WORKBUDDY=1 时要求能找到 WorkBuddy 桌面版自带的引擎（CI 里用官方 CodeBuddy 包模拟安装目录）；
 // 设置 TEST_CLI_CALLS=1 时才真正调用它们（会消耗你账号的额度，所以本地默认不跑）。
@@ -17,8 +18,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'lawdesk-test-'));
 const log = (...a) => console.log('·', ...a);
 
-// ---- 模拟的 OpenAI 兼容接口：把收到的内容特征写进回复里 ----
+// ---- 模拟的 OpenAI 兼容接口：把收到的内容特征写进回复里；/releases/latest 模拟 GitHub 的发布接口 ----
+let releaseHits = 0;
 const mock = http.createServer(async (req, res) => {
+  if (req.url === '/releases/latest') {
+    releaseHits++;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ tag_name: 'v99.0.0', html_url: 'https://example.com/r', body: '## 更新内容\n- 测试', assets: [] }));
+  }
   let body = '';
   for await (const c of req) body += c;
   const j = JSON.parse(body || '{}');
@@ -33,7 +40,8 @@ await once(mock, 'listening');
 // ---- 启动服务 ----
 const srv = spawn(process.execPath, [path.join(root, 'server.js')], {
   cwd: root,
-  env: { ...process.env, PORT: '0', NO_OPEN: '1', LAWDESK_HOME: home },
+  env: { ...process.env, PORT: '0', NO_OPEN: '1', LAWDESK_HOME: home, LAWDESK_APP: '',
+    LAWDESK_UPDATE_API: `http://127.0.0.1:${mock.address().port}/releases/latest` },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 const port = await new Promise((resolve, reject) => {
@@ -100,6 +108,9 @@ try {
       'node_modules/@openai/codex/bin/codex.js'],
     'npm → exe': [head + '"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*\r\n',
       'node_modules/@anthropic-ai/claude-code/bin/claude.exe'],
+    'npm → 无扩展名 node 脚本': [head + 'IF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n) ELSE (\r\n  SET "_prog=node"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n' +
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@tencent-ai\\codebuddy-code\\bin\\codebuddy" %*\r\n',
+      'node_modules/@tencent-ai/codebuddy-code/bin/codebuddy'],
     'pnpm → js': ['@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe"  "%~dp0\\..\\@anthropic-ai\\claude-code\\cli.js" %*\r\n) ELSE (\r\n  node  "%~dp0\\..\\@anthropic-ai\\claude-code\\cli.js" %*\r\n)\r\n',
       '@anthropic-ai/claude-code/cli.js'],
   };
@@ -152,6 +163,23 @@ try {
   assert.equal(file.status, 200);
   assert.equal(Buffer.from(await file.arrayBuffer()).length, fs.statSync(path.join(root, 'test', 'fixtures', '合同材料.docx')).size);
   log('文件下载：通过');
+
+  // 2b. 检查更新：自动检查 24 小时内只联网一次；可以忽略某个版本、关闭自动检查
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  assert.equal(state.version, pkgVersion);
+  const u0 = await api('/api/update');
+  assert.equal(u0.current, pkgVersion);
+  assert.equal(u0.latest?.version, '99.0.0', JSON.stringify(u0));
+  assert.ok(u0.hasUpdate);
+  assert.equal(u0.install, 'source');
+  await api('/api/update');
+  assert.equal(releaseHits, 1, '24 小时内的自动检查应该用缓存');
+  await api('/api/update?force=1');
+  assert.equal(releaseHits, 2, '手动检查应该重新查询');
+  assert.equal((await api('/api/update', { method: 'POST', body: { dismiss: '99.0.0' } })).dismissed, '99.0.0');
+  assert.equal((await api('/api/update', { method: 'POST', body: { auto: false } })).auto, false);
+  assert.equal((await api('/api/state')).config.autoUpdateCheck, false);
+  log('检查更新：通过');
 
   // 3. 真正拉起 CLI（没登录也没关系，只要不是“找不到 / 无法启动”）
   for (const name of ['codex', 'claude', 'codebuddy']) {

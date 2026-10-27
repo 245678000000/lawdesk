@@ -58,6 +58,8 @@ const S = {
   projectsOpen: true,
   filesOpen: false,
   exPage: 0,
+  update: null,          // 检查更新的结果
+  updateChecking: false,
 };
 
 function loadSel() {
@@ -273,6 +275,11 @@ function renderSidebar() {
     : '<div class="sb-empty">还没有项目，点击侧栏上方<br>「新建项目」</div>';
 
   const apiCount = config.providers.length;
+  const upd = S.update;
+  const updHTML = upd?.hasUpdate && upd.dismissed !== upd.latest.version
+    ? `<div class="upd-card"><button class="upd-main" data-act="show-update">${icon('download')}<span>新版本 v${esc(upd.latest.version)} 可以更新</span></button>
+        <button class="icon-btn" data-act="dismiss-update" title="忽略这个版本">${icon('x')}</button></div>`
+    : '';
   $('#sidebar').innerHTML = `
     <div class="sb-top">
       <div class="brand"><span class="brand-mark">律</span>律台</div>
@@ -293,6 +300,7 @@ function renderSidebar() {
       ${convHTML}
     </div>
     <div class="sb-bottom">
+      ${updHTML}
       <button class="local-card" data-act="nav-settings">
         ${icon('laptop')}
         <div style="flex:1;min-width:0">
@@ -993,10 +1001,91 @@ function settingsHTML() {
     ${config.providers.map(providerCardHTML).join('') || '<p class="lead" style="margin-bottom:12px">还没有添加。</p>'}
     <div class="btn-row"><select class="select" id="preset" style="width:auto">${PRESETS.map((p, i) => `<option value="${i}">${p.name}</option>`).join('')}</select>
       <button class="btn" data-act="add-provider">${icon('plus')}添加 API</button></div>
+    <h2>版本与更新</h2>
+    ${updateCardHTML()}
     <h2>本地数据</h2>
     <div class="card"><div class="field"><span>对话、附件、配置都保存在：</span><span class="mono-path">${esc(dataDir)}</span></div>
       <small style="color:var(--muted)">API Key 以明文保存在该目录的 config.json 中，请勿把这个文件夹分享给他人。</small></div>
   </div></div>`;
+}
+
+// ---------------- 检查更新 ----------------
+const INSTALL_HOWTO = {
+  'mac-app': '下载后打开 dmg，把「律台」拖进「应用程序」文件夹替换旧版。对话和设置保存在数据目录里，不受影响。',
+  'windows-app': '下载后运行安装包，会直接覆盖旧版（如果律台还开着，安装程序会提示先关闭）。对话和设置不受影响。',
+  source: '在律台所在目录运行 <code>git pull</code>，然后重新执行 <code>npm start</code>。',
+};
+const pad2 = (n) => String(n).padStart(2, '0');
+const fmtTime = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const fmtSize = (n) => (n >= 1048576 ? Math.round(n / 1048576) + ' MB' : Math.ceil(n / 1024) + ' KB');
+
+function updateCardHTML() {
+  const u = S.update;
+  const auto = S.data.config.autoUpdateCheck !== false;
+  let pill = '';
+  if (S.updateChecking) pill = '<span class="pill">正在检查…</span>';
+  else if (u?.error) pill = '<span class="pill bad">检查失败</span>';
+  else if (u?.hasUpdate) pill = `<span class="pill new">有新版本 v${esc(u.latest.version)}</span>`;
+  else if (u?.latest) pill = '<span class="pill ok">已是最新版本</span>';
+  const page = u?.releasesPage || 'https://github.com/245678000000/lawdesk/releases/latest';
+  const line = u?.error ? `${esc(u.error)}。可以稍后重试，或直接打开<a href="${esc(page)}" target="_blank" rel="noopener">发布页</a>查看。`
+    : u?.checkedAt ? `上次检查：${fmtTime(u.checkedAt)}` : '还没有检查过。';
+  return `<div class="card" id="update-card">
+    <div class="card-head"><span class="ttl">律台 v${esc(S.data.version)}</span>${pill}<span class="grow"></span>
+      <label class="switch"><input type="checkbox" id="upd-auto"${auto ? ' checked' : ''}>自动检查更新</label></div>
+    <p class="lead" style="margin:0 0 12px;font-size:13.5px">${line}</p>
+    <div class="btn-row"><button class="btn small" data-act="check-update"${S.updateChecking ? ' disabled' : ''}>${icon('refresh')}检查更新</button>
+      ${u?.hasUpdate ? `<button class="btn primary small" data-act="show-update">${icon('download')}查看新版本</button>` : ''}
+      <a class="btn small" href="${esc(page)}" target="_blank" rel="noopener">所有版本</a></div>
+    <small style="color:var(--muted);display:block;margin-top:10px">只向 GitHub 查询最新版本号，不会上传任何对话、文件或配置。自动检查每天最多一次。</small>
+  </div>`;
+}
+function refreshUpdateCard() {
+  const card = $('#update-card');
+  if (card) card.outerHTML = updateCardHTML();
+}
+
+async function checkUpdate(force = false) {
+  S.update = await api('/api/update' + (force ? '?force=1' : '')).catch((e) => ({ ...(S.update || {}), error: e.message }));
+  renderSidebar();
+  refreshUpdateCard();
+  return S.update;
+}
+
+// 设置页的「检查更新」按钮，以及客户端菜单里的「检查更新…」
+async function manualCheckUpdate() {
+  const onPage = !!$('#update-card');
+  S.updateChecking = true;
+  refreshUpdateCard();
+  if (!onPage) toast('正在检查更新…', 1500);
+  const u = await checkUpdate(true);
+  S.updateChecking = false;
+  refreshUpdateCard();
+  if (u.error) { if (!onPage) toast('检查更新失败：' + u.error, 4000); }
+  else if (u.hasUpdate) showUpdateModal();
+  else toast(`已是最新版本（v${u.current}）`);
+}
+window.lawdeskCheckUpdate = manualCheckUpdate;
+
+function showUpdateModal() {
+  const u = S.update;
+  const l = u.latest;
+  const dl = l.download;
+  const label = dl ? `下载新版（${fmtSize(dl.size)}）` : u.install === 'source' ? '查看发布说明' : '打开下载页';
+  const m = modal(`<h3>律台 v${esc(l.version)} 可以更新</h3>
+    <div class="upd-meta">当前版本 v${esc(u.current)}${l.publishedAt ? ' · 发布于 ' + fmtTime(l.publishedAt).slice(0, 10) : ''}</div>
+    ${l.notes ? `<div class="upd-notes md">${renderMarkdown(l.notes)}</div>` : ''}
+    <p class="upd-how">${INSTALL_HOWTO[u.install] || INSTALL_HOWTO.source}</p>
+    <div class="btn-row"><button class="btn" data-m="skip">忽略这个版本</button><span style="flex:1"></span>
+      <button class="btn" data-m="cancel">稍后</button>
+      <a class="btn primary" href="${esc(dl?.url || l.url)}" target="_blank" rel="noopener">${icon('download')}${label}</a></div>`);
+  m.onAction = (act) => { m.close(); if (act === 'skip') dismissUpdate(l.version); };
+}
+
+async function dismissUpdate(version) {
+  const r = await api('/api/update', { method: 'POST', body: { dismiss: version } }).catch(() => null);
+  S.update = r ? { ...r, error: S.update?.error } : { ...S.update, dismissed: version };
+  renderSidebar();
 }
 
 function readCard(card) {
@@ -1206,6 +1295,9 @@ document.addEventListener('click', async (e) => {
     case 'nav-skills': go('#/skills'); break;
     case 'nav-memory': go('#/memory'); break;
     case 'nav-settings': go('#/settings'); break;
+    case 'show-update': showUpdateModal(); break;
+    case 'dismiss-update': dismissUpdate(S.update.latest.version); break;
+    case 'check-update': manualCheckUpdate(); break;
     case 'toggle-search': S.showSearch = !S.showSearch; if (!S.showSearch) S.search = ''; renderSidebar(); $('#sb-search')?.focus(); break;
     case 'toggle-sidebar': $('#app').classList.toggle('collapsed'); renderMain(); break;
     case 'toggle-projects': S.projectsOpen = !S.projectsOpen; renderSidebar(); break;
@@ -1357,6 +1449,15 @@ for (const id of ['#file-input', '#folder-input']) {
   });
 }
 
+document.addEventListener('change', async (e) => {
+  if (e.target.id !== 'upd-auto') return;
+  const auto = e.target.checked;
+  await api('/api/update', { method: 'POST', body: { auto } }).catch(() => {});
+  S.data.config.autoUpdateCheck = auto;
+  toast(auto ? '已开启自动检查更新' : '已关闭自动检查更新');
+  if (auto) checkUpdate();
+});
+
 window.addEventListener('hashchange', route);
 
 // ---------------- 启动 ----------------
@@ -1369,4 +1470,6 @@ window.addEventListener('hashchange', route);
   }
   if (window.innerWidth < 760) $('#app').classList.add('collapsed');
   await route();
+  // 是否真的联网由服务端决定：关闭了自动检查或 24 小时内查过，就直接返回上次的结果
+  setTimeout(() => checkUpdate(), 1500);
 })();

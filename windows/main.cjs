@@ -164,6 +164,12 @@ function go(hash) {
   if (port) win.webContents.executeJavaScript(`location.hash = ${JSON.stringify(hash)}`).catch(() => {});
 }
 
+// 由网页去查询并展示结果（和设置页里的「检查更新」按钮是同一套逻辑）
+function checkUpdate() {
+  showWindow();
+  if (port) win.webContents.executeJavaScript('window.lawdeskCheckUpdate && window.lawdeskCheckUpdate()').catch(() => {});
+}
+
 function buildMenu() {
   const template = [
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
@@ -201,6 +207,7 @@ function buildMenu() {
     {
       label: '帮助',
       submenu: [
+        { label: '检查更新…', click: checkUpdate },
         { label: '项目主页', click: () => shell.openExternal(HOMEPAGE) },
         { label: `关于${APP_NAME}`, click: () => dialog.showMessageBox(win, {
           type: 'info', title: `关于${APP_NAME}`, message: `${APP_NAME} ${app.getVersion()}`,

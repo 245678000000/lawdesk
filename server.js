@@ -10,6 +10,7 @@ import { BASE_PROMPT, EXAMPLES } from './lib/skills.js';
 import { runClaude, runCodex, runCodeBuddy, detectCli, shellEnvReady } from './lib/cli.js';
 import { runOpenAI, runAnthropic } from './lib/api.js';
 import { extractText } from './lib/extract.js';
+import { VERSION, checkUpdate, updateSettings } from './lib/update.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -284,7 +285,7 @@ async function handleApi(req, res, url) {
     const projects = store.getProjects();
     return send(res, 200, {
       config: store.publicConfig(), clis: CLIS, skills: store.getSkills(), examples: EXAMPLES,
-      projects, memory: store.getMemory(), dataDir: store.DATA_DIR, platform: process.platform,
+      projects, memory: store.getMemory(), dataDir: store.DATA_DIR, platform: process.platform, version: VERSION,
       conversations: store.listConversations().map((c) => ({ ...c, running: running.has(c.id) })),
     });
   }
@@ -380,6 +381,12 @@ async function handleApi(req, res, url) {
     started.job.listeners.add(res);
     req.on('close', () => started.job.listeners.delete(res));
     return;
+  }
+  if (url.pathname === '/api/update' && method === 'GET') {
+    return send(res, 200, await checkUpdate({ force: !!url.searchParams.get('force') }));
+  }
+  if (url.pathname === '/api/update' && method === 'POST') {
+    return send(res, 200, updateSettings(await readJSON(req)));
   }
   if (url.pathname === '/api/test' && method === 'POST') {
     const { backend, model } = await readJSON(req);
@@ -480,7 +487,7 @@ refreshClis();
 server.listen(PORT, '127.0.0.1', () => {
   const port = server.address().port;
   const link = `http://127.0.0.1:${port}`;
-  console.log(`\n  律台 · 本地法律智能体已启动：${link}`);
+  console.log(`\n  律台 v${VERSION} · 本地法律智能体已启动：${link}`);
   console.log(`  Claude Code：${CLIS.claude.found ? CLIS.claude.version + '（' + CLIS.claude.path + '）' : '未找到'}`);
   console.log(`  Codex：${CLIS.codex.found ? CLIS.codex.version + '（' + CLIS.codex.path + '）' : '未找到'}`);
   console.log(`  WorkBuddy：${CLIS.codebuddy.found ? CLIS.codebuddy.version + '（' + CLIS.codebuddy.path + '）' : '未找到'}`);
