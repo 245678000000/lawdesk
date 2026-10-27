@@ -11,6 +11,7 @@ import { runClaude, runCodex, runCodeBuddy, detectCli, shellEnvReady } from './l
 import { runOpenAI, runAnthropic } from './lib/api.js';
 import { extractText } from './lib/extract.js';
 import { VERSION, checkUpdate, updateSettings } from './lib/update.js';
+import * as chatgpt from './lib/chatgpt.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -30,7 +31,7 @@ function applyEvent(parts, ev) {
     for (const k of Object.keys(fields)) if (fields[k] === undefined) delete fields[k];
     if (existing) Object.assign(existing, fields); else parts.push({ type: 'tool', ...fields });
   } else if (ev.t === 'notice' || ev.t === 'error') {
-    parts.push({ type: ev.t, text: ev.d });
+    parts.push({ type: ev.t, text: ev.d, ...(ev.code ? { code: ev.code } : {}) });
   }
 }
 
@@ -77,19 +78,35 @@ function attachmentNote(ws, attachments) {
   return '\n\n本次附件（已保存在工作区）：\n' + attachments.map((a) => '- ' + path.join(ws, a)).join('\n');
 }
 
-async function apiMessages(conv, ws) {
+const IMAGE_RE = /\.(png|jpe?g|gif|webp)$/i;
+const IMAGE_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+function imageDataUrl(abs) {
+  try {
+    if (fs.statSync(abs).size > 10 * 1024 * 1024) return null;
+    return `data:${IMAGE_MIME[path.extname(abs).toLowerCase()]};base64,${fs.readFileSync(abs).toString('base64')}`;
+  } catch { return null; }
+}
+
+// images：模型能直接看图（ChatGPT 套餐直接对话）时把图片原样带上，否则只说明有图片
+async function apiMessages(conv, ws, { images = false } = {}) {
   const out = [];
   for (const m of conv.messages) {
     if (m.role === 'user') {
-      if (m.attachments?.length && !m.context) {
+      const files = m.attachments || [];
+      const pics = files.filter((a) => IMAGE_RE.test(a));
+      if (files.length > pics.length && !m.context) {
         const docs = [];
-        for (const a of m.attachments) {
+        for (const a of files.filter((f) => !IMAGE_RE.test(f))) {
           const r = await extractText(path.join(ws, a));
           docs.push(`<文件 name="${path.basename(a)}">\n${r.text}\n</文件>`);
         }
         m.context = docs.join('\n\n');
       }
-      out.push({ role: 'user', content: (m.context ? m.context + '\n\n' : '') + (m.text || '（见附件）') });
+      const urls = images ? pics.map((a) => imageDataUrl(path.join(ws, a))).filter(Boolean) : [];
+      const picNote = !images && pics.length
+        ? pics.map((a) => `<文件 name="${path.basename(a)}">（图片在这个模式下无法读取，请改用 ChatGPT、Claude Code 或 Codex）</文件>`).join('\n\n') + '\n\n'
+        : '';
+      out.push({ role: 'user', content: picNote + (m.context ? m.context + '\n\n' : '') + (m.text || '（见附件）'), images: urls });
     } else {
       const text = (m.parts || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
       if (text) out.push({ role: 'assistant', content: text });
@@ -99,7 +116,10 @@ async function apiMessages(conv, ws) {
   const merged = [];
   for (const m of out) {
     const last = merged[merged.length - 1];
-    if (last && last.role === m.role) last.content += '\n\n' + m.content; else merged.push({ ...m });
+    if (last && last.role === m.role) {
+      last.content += '\n\n' + m.content;
+      if (m.images?.length) last.images = [...(last.images || []), ...m.images];
+    } else merged.push({ ...m });
   }
   // 控制总长度：从最早的消息开始丢
   let total = merged.reduce((n, m) => n + m.content.length, 0);
@@ -154,8 +174,18 @@ async function startChat(body) {
     await new Promise((r) => setImmediate(r));
     let result = {};
     let error = null;
+    let errorCode;
     try {
-      if (CLI_BACKENDS.includes(backend)) {
+      // ChatGPT 套餐：本机有 Codex 就交给 Codex（能读写案卷和工作区），否则直接对话
+      let plan = null;
+      if (backend === 'chatgpt') {
+        const acct = chatgpt.activeAccount();
+        const viaCodex = cfg.chatgpt.useCodex !== false && CLIS.codex.found;
+        const useModel = model || await chatgpt.defaultModel(acct);
+        job.model = useModel;
+        plan = { acct, viaCodex, model: useModel };
+      }
+      if (CLI_BACKENDS.includes(backend) || plan?.viaCodex) {
         const cwd = project?.folder || ws;
         const addDirs = project?.folder ? [ws] : [];
         const sess = conv.sessions?.[backend];
@@ -173,11 +203,28 @@ async function startChat(body) {
           // Codex 没有追加系统提示的参数：新会话时把说明放在消息最前面，续聊时只带上本轮技能
           if (!resume) prompt = `<instructions>\n${systemPrompt}\n</instructions>\n\n${prompt}`;
           else if (skill) prompt = `${skill.prompt}\n\n${prompt}`;
-          const images = attachments.filter((a) => /\.(png|jpe?g|gif|webp)$/i.test(a)).map((a) => path.join(ws, a));
-          result = await runCodex({ prompt, cwd, addDirs: [ws], sessionId: resume, model, permission, images, cfg: cfg.codex },
-            emit, job.controller.signal);
+          const images = attachments.filter((a) => IMAGE_RE.test(a)).map((a) => path.join(ws, a));
+          const opts = { prompt, cwd, addDirs: [ws], sessionId: resume, model, permission, images, cfg: cfg.codex };
+          if (plan) {
+            // Codex 一轮可能跑很久，令牌至少留出 15 分钟
+            const token = await chatgpt.accessToken(plan.acct.clientId, { minValidMs: 15 * 60e3 });
+            Object.assign(opts, { model: plan.model, configArgs: chatgpt.codexProviderArgs(), extraEnv: { LAWDESK_CHATGPT_TOKEN: token } });
+          }
+          try {
+            result = await runCodex(opts, emit, job.controller.signal);
+          } catch (e) {
+            throw (plan && chatgpt.explainCodexPlanError(e.message)) || e;
+          }
         }
         if (result.sessionId) conv.sessions = { ...conv.sessions, [backend]: { id: result.sessionId, cwd } };
+      } else if (plan) {
+        emit({ t: 'status', d: attachments.length ? '正在读取附件…' : '连接中…' });
+        const messages = await apiMessages(conv, ws, { images: true });
+        const systemPrompt = buildSystemPrompt({ skill, project, ws, isCli: false });
+        result = await chatgpt.runChatGPT({ clientId: plan.acct.clientId, model: plan.model, systemPrompt, messages },
+          emit, job.controller.signal);
+        // 直接对话不续接 Codex 会话，之后再走 Codex 时从对话记录重新开始
+        if (conv.sessions?.chatgpt) delete conv.sessions.chatgpt;
       } else if (backend.startsWith('api:')) {
         const provider = cfg.providers.find((p) => 'api:' + p.id === backend);
         if (!provider) throw new Error('找不到这个 API 配置，可能已被删除。');
@@ -194,10 +241,11 @@ async function startChat(body) {
       }
     } catch (err) {
       if (!job.controller.signal.aborted) error = err.name === 'AbortError' ? null : err.message || String(err);
+      errorCode = err.code;
     }
 
     if (job.controller.signal.aborted) emit({ t: 'notice', d: '已停止' });
-    if (error) emit({ t: 'error', d: error });
+    if (error) emit({ t: 'error', d: error, ...(typeof errorCode === 'string' && errorCode.startsWith('chatgpt_') ? { code: errorCode } : {}) });
 
     // 重新读取，避免覆盖运行期间的重命名等操作
     const fresh = store.getConversation(conv.id) || conv;
@@ -286,6 +334,7 @@ async function handleApi(req, res, url) {
     return send(res, 200, {
       config: store.publicConfig(), clis: CLIS, skills: store.getSkills(), examples: EXAMPLES,
       projects, memory: store.getMemory(), dataDir: store.DATA_DIR, platform: process.platform, version: VERSION,
+      chatgpt: chatgpt.publicState(),
       conversations: store.listConversations().map((c) => ({ ...c, running: running.has(c.id) })),
     });
   }
@@ -382,6 +431,34 @@ async function handleApi(req, res, url) {
     req.on('close', () => started.job.listeners.delete(res));
     return;
   }
+  if (url.pathname === '/api/chatgpt' && method === 'GET') return send(res, 200, chatgpt.publicState());
+  if ((r = m(/^\/api\/chatgpt\/login\/([\w-]{8,64})$/)) && method === 'GET') return send(res, 200, chatgpt.loginState(r[1]));
+  if (url.pathname === '/api/chatgpt/welcome' && method === 'POST') {
+    chatgpt.acknowledgeWelcome();
+    return send(res, 200, chatgpt.publicState());
+  }
+  if (url.pathname === '/api/chatgpt/active' && method === 'POST') {
+    chatgpt.setActive((await readJSON(req)).account);
+    return send(res, 200, chatgpt.publicState());
+  }
+  if (url.pathname === '/api/chatgpt/logout' && method === 'POST') {
+    const { revoked } = await chatgpt.logout((await readJSON(req)).account);
+    return send(res, 200, { ...chatgpt.publicState(), revoked });
+  }
+  if (url.pathname === '/api/chatgpt/models' && method === 'POST') {
+    const { account } = await readJSON(req);
+    await chatgpt.refreshModels(account || chatgpt.activeAccount().clientId);
+    return send(res, 200, chatgpt.publicState());
+  }
+  if (url.pathname === '/api/chatgpt/settings' && method === 'POST') {
+    const { useCodex, bannerDismissed } = await readJSON(req);
+    const cur = store.getConfig();
+    const next = { ...cur.chatgpt };
+    if (typeof useCodex === 'boolean') next.useCodex = useCodex;
+    if (typeof bannerDismissed === 'boolean') next.bannerDismissed = bannerDismissed;
+    store.saveConfig({ ...cur, chatgpt: next });
+    return send(res, 200, { config: store.publicConfig() });
+  }
   if (url.pathname === '/api/update' && method === 'GET') {
     return send(res, 200, await checkUpdate({ force: !!url.searchParams.get('force') }));
   }
@@ -418,6 +495,19 @@ async function testBackend(backend, model) {
       await run({ prompt, systemPrompt: '', cwd: dir, model, permission: 'readonly', cfg: cfg[backend] }, emit, controller.signal);
     } else if (backend === 'codex') {
       await runCodex({ prompt, cwd: dir, model, permission: 'readonly', ephemeral: true, cfg: cfg.codex }, emit, controller.signal);
+    } else if (backend === 'chatgpt') {
+      const acct = chatgpt.activeAccount();
+      const useModel = model || await chatgpt.defaultModel(acct);
+      if (cfg.chatgpt.useCodex !== false && CLIS.codex.found) {
+        const token = await chatgpt.accessToken(acct.clientId);
+        try {
+          await runCodex({ prompt, cwd: dir, model: useModel, permission: 'readonly', ephemeral: true, cfg: cfg.codex,
+            configArgs: chatgpt.codexProviderArgs(), extraEnv: { LAWDESK_CHATGPT_TOKEN: token } }, emit, controller.signal);
+        } catch (e) { throw chatgpt.explainCodexPlanError(e.message) || e; }
+      } else {
+        await chatgpt.runChatGPT({ clientId: acct.clientId, model: useModel, systemPrompt: '你是一个简洁的助手。',
+          messages: [{ role: 'user', content: prompt }] }, emit, controller.signal);
+      }
     } else {
       const provider = cfg.providers.find((p) => 'api:' + p.id === backend);
       if (!provider) throw new Error('请先保存这个 API 配置');
@@ -437,6 +527,24 @@ async function testBackend(backend, model) {
   }
 }
 
+// 登录完成后浏览器里显示的页面
+function loginResultPage({ ok, message, planUsage, email }) {
+  const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const title = ok ? (planUsage ? '已登录 ChatGPT' : '已登录，但没有开启套餐用量') : '登录没有完成';
+  const body = ok
+    ? (planUsage ? `${email ? escHtml(email) + ' · ' : ''}律台现在可以使用你的 ChatGPT 套餐了。可以关闭这个页面，回到律台。`
+      : '这次授权没有包含「使用 ChatGPT 套餐」的权限。回到律台的「模型与连接」，可以重新开启。')
+    : escHtml(message);
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>律台 · ${title}</title><style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f4f2;color:#1f1f1e;font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;padding:16px;box-sizing:border-box}
+.card{max-width:440px;width:100%;background:#fff;border:1px solid #e6e6e3;border-radius:16px;padding:28px 28px 24px;box-shadow:0 4px 18px rgba(0,0,0,.05)}
+h1{font-size:20px;margin:0 0 8px}.mark{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:8px;background:#1f1f1e;color:#fff;font-size:15px;margin-right:8px;vertical-align:-5px}
+p{margin:0;color:#55554f}.st{color:${ok ? '#2f7d4f' : '#b42318'}}
+@media (prefers-color-scheme:dark){body{background:#1b1b1a;color:#ecece8}.card{background:#232322;border-color:#34342f}p{color:#c2c2bb}.mark{background:#ecece8;color:#1b1b1a}.st{color:${ok ? '#7cc59a' : '#f3a69c'}}}
+</style></head><body><div class="card"><h1><span class="mark">律</span><span class="st">${title}</span></h1><p>${body}</p></div></body></html>`;
+}
+
 const server = http.createServer(async (req, res) => {
   // 只接受本机访问，防止 DNS 重绑定和其他网页伪造请求
   const host = (req.headers.host || '').replace(/:\d+$/, '');
@@ -446,6 +554,26 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) {
       if (req.method !== 'GET' && req.headers['x-lawdesk'] !== '1') { res.writeHead(403); res.end('Forbidden'); return; }
       return await handleApi(req, res, url);
+    }
+    if (url.pathname === '/auth/chatgpt/start' && req.method === 'GET') {
+      // 只接受律台自己的页面或系统浏览器直接打开，拒绝别的网站把用户引到这里
+      const site = req.headers['sec-fetch-site'];
+      if (site && site !== 'same-origin' && site !== 'none') { res.writeHead(403); res.end('Forbidden'); return; }
+      const location = await chatgpt.startLogin({
+        port: server.address().port,
+        ui: /^[\w-]{8,64}$/.test(url.searchParams.get('ui') || '') ? url.searchParams.get('ui') : null,
+        account: url.searchParams.get('account') || null,
+        consent: url.searchParams.get('consent') === '1',
+      });
+      res.writeHead(302, { Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+      res.end();
+      return;
+    }
+    if (url.pathname === '/auth/callback' && req.method === 'GET') {
+      const result = await chatgpt.finishLogin(url.searchParams);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+      res.end(loginResultPage(result));
+      return;
     }
     let r;
     if ((r = url.pathname.match(/^\/files\/([a-z0-9]{16})\/(.+)$/))) {

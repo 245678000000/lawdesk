@@ -347,3 +347,42 @@ a.btn { text-decoration: none; }
   .ex-grid, .skills-grid, .grid2 { grid-template-columns: 1fr; }
   .messages { padding: 20px 16px; } .chat-foot { padding: 0 12px 12px; }
 }
+
+/* ---------- ChatGPT 套餐（按 OpenAI Sign in with ChatGPT 的按钮与界面规范） ---------- */
+.siwc-btn { display: inline-flex; align-items: center; justify-content: center; gap: 12px; height: 45px; padding: 0 20px; border-radius: 12px;
+  background: #000; color: #fff; font-size: 15px; font-weight: 500; text-decoration: none; white-space: nowrap; flex: none; }
+.siwc-btn:hover { background: #222; }
+.siwc-btn img { width: 21px; height: 21px; }
+.siwc-btn .lb { display: none; }
+.gpt-logo { display: inline-flex; flex: none; }
+.gpt-logo img { width: 16px; height: 16px; }
+.gpt-logo .lw { display: none; }
+@media (prefers-color-scheme: dark) {
+  .siwc-btn { background: #fff; color: #000; }
+  .siwc-btn:hover { background: #e9e9e6; }
+  .siwc-btn .lw { display: none; } .siwc-btn .lb { display: inline; }
+  .gpt-logo .lb { display: none; } .gpt-logo .lw { display: inline; }
+}
+.gpt-foot { display: block; margin-top: 12px; color: var(--muted); }
+.gpt-models { display: flex; flex-wrap: wrap; gap: 6px; }
+.gpt-prev { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: 14px; }
+.plan-note { display: flex; align-items: center; gap: 6px; margin: 6px 10px 0; font-size: 12.5px; color: var(--muted); }
+.plan-note:empty { display: none; }
+.plan-note a { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; margin-left: 2px; }
+.plan-banner { width: 100%; max-width: 900px; display: flex; align-items: center; gap: 14px; margin-top: 18px; padding: 14px 12px 14px 18px;
+  border: 1px solid var(--line-strong); border-radius: 14px; background: var(--panel); }
+.plan-banner .gpt-logo img { width: 22px; height: 22px; }
+.plan-banner .t { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: 14px; }
+.plan-banner .t span { color: var(--muted); font-size: 13px; }
+.plan-limit { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 12px; padding: 12px 14px; margin: 8px 0; max-width: 520px; }
+.plan-limit .pl-brand { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+.plan-limit .pl-title { font-weight: 600; }
+.plan-limit .pl-text { font-size: 14px; color: var(--text-2); margin: 2px 0 10px; }
+.plan-welcome { text-align: center; padding-top: 6px; }
+.plan-welcome .gpt-logo img { width: 32px; height: 32px; }
+.plan-welcome h3 { margin: 12px 0 8px; }
+.plan-welcome p { color: var(--text-2); margin: 0; }
+@media (max-width: 640px) {
+  .plan-banner { flex-wrap: wrap; }
+  .plan-banner .t { flex-basis: calc(100% - 80px); }
+}

@@ -126,6 +126,11 @@ function backendOptions() {
     groups.push({ backend: 'codex', label: 'Codex', sub: clis.codex?.source === 'chatgpt' ? 'ChatGPT 内置' : '本机 CLI', ok: clis.codex?.found,
       models: ['', ...config.codex.models] });
   }
+  const acct = gptAccount();
+  groups.push({ backend: 'chatgpt', label: 'ChatGPT', isPlan: true, ok: !!acct?.planUsage,
+    sub: !acct ? '未登录' : gptViaCodex() ? 'ChatGPT 套餐 · 经 Codex' : 'ChatGPT 套餐 · 直接对话',
+    models: acct?.models.length ? acct.models.map((m) => m.slug) : [''],
+    names: Object.fromEntries((acct?.models || []).map((m) => [m.slug, m.name])) });
   for (const p of config.providers) {
     groups.push({ backend: 'api:' + p.id, label: p.name, sub: p.type === 'anthropic' ? 'Anthropic API' : 'OpenAI 兼容 API',
       ok: !!p.models.length, models: p.models, isApi: true });
@@ -141,15 +146,15 @@ function ensureSel() {
     S.sel.backend = g?.backend || 'claude';
     S.sel.model = g?.isApi ? g.models[0] : '';
   }
-  if (g && !g.models.includes(S.sel.model)) S.sel.model = g.isApi ? g.models[0] : '';
+  if (g && !g.models.includes(S.sel.model)) S.sel.model = g.isApi || g.isPlan ? g.models[0] : '';
   if (!['readonly', 'edit', 'all'].includes(S.sel.permission)) S.sel.permission = S.data.config.defaultPermission || 'edit';
 }
 
 const isApiBackend = (b) => String(b).startsWith('api:');
 function backendLabel(backend, model) {
   const g = backendOptions().find((x) => x.backend === backend);
-  const name = g ? g.label : { claude: 'Claude Code', codex: 'Codex', codebuddy: 'WorkBuddy' }[backend] || '已删除的 API';
-  return model ? `${name} · ${model}` : name;
+  const name = g ? g.label : { claude: 'Claude Code', codex: 'Codex', codebuddy: 'WorkBuddy', chatgpt: 'ChatGPT' }[backend] || '已删除的 API';
+  return model ? `${name} · ${g?.names?.[model] || model}` : name;
 }
 const PERMS = {
   readonly: { label: '只读', desc: '只能读取材料，不改动任何文件' },
@@ -309,6 +314,7 @@ function renderSidebar() {
             <span class="badge${clis.claude?.found ? ' on' : ''}">Claude Code</span>
             <span class="badge${clis.codex?.found ? ' on' : ''}">Codex</span>
             <span class="badge${clis.codebuddy?.found ? ' on' : ''}">WorkBuddy</span>
+            <span class="badge${gptAccount()?.planUsage ? ' on' : ''}">ChatGPT</span>
             <span class="badge${apiCount ? ' on' : ''}">API ${apiCount || ''}</span>
           </div>
         </div>
@@ -346,11 +352,18 @@ function composerHTML(placeholder) {
       <button class="icon-btn mic${recognizing ? ' on' : ''}${SpeechRec ? '' : ' hidden'}" data-act="mic" title="语音输入">${icon('mic')}</button>
       <button class="send-btn" id="send-btn" data-act="send">${icon('up')}</button>
     </div>
+    <div class="plan-note" id="plan-note">${planNoteHTML()}</div>
   </div>`;
 }
 
+// 用 ChatGPT 套餐时，在输入框下方说明并给出「管理用量」入口
+function planNoteHTML() {
+  if (S.sel.backend !== 'chatgpt' || !gptAccount()?.planUsage) return '';
+  return `${gptLogo()}<span>正在使用 ChatGPT 套餐</span><a href="${esc(S.data.chatgpt.usageUrl)}" target="_blank" rel="noopener">管理用量</a>`;
+}
+
 function pickersHTML() {
-  const api = isApiBackend(S.sel.backend);
+  const api = isApiBackend(S.sel.backend) || (S.sel.backend === 'chatgpt' && !gptViaCodex());
   return `<button class="pick" data-act="model-menu">${esc(backendLabel(S.sel.backend, S.sel.model || ''))}${S.sel.model ? '' : ' · 默认'}${icon('down')}</button>` +
     (api ? '<span class="pick static" title="自有 API 为纯对话模式，附件会转成文字发送">纯对话</span>'
       : `<button class="pick" data-act="perm-menu">${PERMS[S.sel.permission].label}${icon('down')}</button>`);
@@ -370,6 +383,8 @@ function refreshComposer() {
   if (tags) tags.innerHTML = composerTagsHTML();
   const p = $('#pickers');
   if (p) p.innerHTML = pickersHTML();
+  const note = $('#plan-note');
+  if (note) note.innerHTML = planNoteHTML();
   updateSendButton();
 }
 
@@ -648,9 +663,13 @@ function partsHTML(parts, live) {
       }
     } else if (p.type === 'notice') {
       html += `<div class="notice">${esc(p.text)}</div>`;
+    } else if (p.type === 'error' && p.code === 'chatgpt_usage_limit') {
+      html += `<div class="plan-limit"><div class="pl-brand">${gptLogo()}ChatGPT</div>
+        <div class="pl-title">已达到用量上限</div><div class="pl-text">请在 ChatGPT 设置中查看你的套餐或律台的用量上限。</div>
+        <a class="btn primary small" href="${esc(S.data.chatgpt.usageUrl)}" target="_blank" rel="noopener">管理用量</a></div>`;
     } else if (p.type === 'error') {
       const linked = esc(p.text).replace(/https?:\/\/[^\s<）)]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
-      html += `<div class="error-box">${linked}</div>`;
+      html += `<div class="error-box">${linked}${p.code === 'chatgpt_login' ? '<div style="margin-top:8px"><button class="btn small" data-act="nav-settings">去「模型与连接」登录</button></div>' : ''}</div>`;
     }
   }
   return html;
@@ -780,6 +799,7 @@ function homeHTML() {
     <h1>今天要推进哪项法律任务</h1>
     ${composerHTML()}
     ${chipsHTML()}
+    ${planBannerHTML()}
     ${examplesHTML()}
   </div>`;
 }
@@ -987,7 +1007,9 @@ function settingsHTML() {
   const { config, dataDir } = S.data;
   return `<div class="page"><div class="page-inner">
     <h1>模型与连接</h1>
-    <p class="lead">不需要注册律台账号。优先使用本机的 Claude Code、Codex 或 WorkBuddy（能读写本地文件、执行多步任务），没单独装命令行工具时会自动使用桌面 App 自带的引擎；也可以填自己的 API Key（纯对话）。</p>
+    <p class="lead">不需要注册律台账号。可以用 ChatGPT 账号登录、使用你的 ChatGPT 套餐；也可以用本机的 Claude Code、Codex 或 WorkBuddy（能读写本地文件、执行多步任务，没单独装命令行工具时会自动使用桌面 App 自带的引擎）；或者填自己的 API Key（纯对话）。</p>
+    <h2>ChatGPT 套餐</h2>
+    ${chatgptCardHTML()}
     <h2>本机命令行智能体</h2>
     ${cliCardHTML('claude', 'Claude Code', '调用 <code>claude -p</code>。沿用你在终端里的登录状态和 ~/.claude 配置。',
       'ANTHROPIC_BASE_URL=https://your-proxy.example.com\nANTHROPIC_AUTH_TOKEN=sk-…\nANTHROPIC_MODEL=…')}
@@ -1005,8 +1027,127 @@ function settingsHTML() {
     ${updateCardHTML()}
     <h2>本地数据</h2>
     <div class="card"><div class="field"><span>对话、附件、配置都保存在：</span><span class="mono-path">${esc(dataDir)}</span></div>
-      <small style="color:var(--muted)">API Key 以明文保存在该目录的 config.json 中，请勿把这个文件夹分享给他人。</small></div>
+      <small style="color:var(--muted)">API Key 以明文保存在该目录的 config.json 中，ChatGPT 登录令牌保存在 chatgpt/ 子目录，请勿把这个文件夹分享给他人。</small></div>
   </div></div>`;
+}
+
+// ---------------- ChatGPT 套餐 ----------------
+// 按 OpenAI「Sign in with ChatGPT」的界面规范：官方按钮、首次使用说明、输入框旁的用量入口、用量上限提示
+const gptAccount = () => {
+  const g = S.data?.chatgpt;
+  return g?.accounts.find((a) => a.id === g.active && a.signedIn) || null;
+};
+const gptViaCodex = () => S.data.config.chatgpt?.useCodex !== false && !!S.data.clis.codex?.found;
+const gptLogo = () => '<span class="gpt-logo"><img class="lb" src="/brand/chatgpt-logo-black.svg" alt=""><img class="lw" src="/brand/chatgpt-logo-white.svg" alt=""></span>';
+
+// 每次渲染生成新的 ui 标识，点击后用它轮询这次登录的结果
+function loginHref({ account, consent } = {}) {
+  const ui = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  return `/auth/chatgpt/start?ui=${ui}${account ? '&account=' + encodeURIComponent(account) : ''}${consent ? '&consent=1' : ''}`;
+}
+const siwcButton = (href) => `<a class="siwc-btn" href="${esc(href)}" target="_blank" rel="noopener" data-login>
+  <img class="lw" src="/brand/chatgpt-logo-white.svg" alt=""><img class="lb" src="/brand/chatgpt-logo-black.svg" alt=""><span>Continue with ChatGPT</span></a>`;
+
+function chatgptCardHTML() {
+  const g = S.data.chatgpt;
+  const acct = gptAccount();
+  const codex = !!S.data.clis.codex?.found;
+  const useCodex = S.data.config.chatgpt?.useCodex !== false;
+  const engine = useCodex && codex ? '本机有 Codex：会通过 Codex 执行，可以读取案卷、在工作区生成文件。'
+    : codex ? '已设置为直接对话：附件会转成文字或图片发送，不能直接读写本机文件。'
+      : '本机没有 Codex：直接对话，附件会转成文字或图片发送，不能直接读写本机文件。';
+  const codexSwitch = `<label class="switch"${codex ? '' : ' title="没有检测到 Codex"'}><input type="checkbox" id="gpt-codex"${useCodex ? ' checked' : ''}${codex ? '' : ' disabled'}>有 Codex 时通过 Codex 执行</label>`;
+  if (!acct) {
+    const previous = g.accounts.filter((a) => !a.signedIn && a.email);
+    return `<div class="card" id="chatgpt-card">
+      <div class="card-head"><span class="ttl">使用你的 ChatGPT 套餐</span><span class="grow"></span>${codexSwitch}</div>
+      <p class="lead" style="margin:0 0 14px;font-size:13.5px">用 ChatGPT 账号登录后，律台中符合条件的 AI 请求会使用你 ChatGPT 套餐包含的用量（或 credits 余额）完成，不需要 API Key。律台看不到你在 ChatGPT 里的对话；律台本身免费，不另外收费。</p>
+      ${previous.map((a) => `<div class="gpt-prev"><span>${esc(a.email)}</span><span class="pill${a.needsLogin ? ' bad' : ''}">${a.needsLogin ? '登录已失效' : '已退出'}</span>
+        <a class="btn small" href="${esc(loginHref({ account: a.id }))}" target="_blank" rel="noopener" data-login>重新登录</a></div>`).join('')}
+      <div class="btn-row">${siwcButton(loginHref())}</div>
+      <small class="gpt-foot">${engine}</small>
+    </div>`;
+  }
+  const others = g.accounts.filter((a) => a.signedIn);
+  const models = acct.models || [];
+  return `<div class="card" id="chatgpt-card">
+    <div class="card-head"><span class="ttl">${esc(acct.email || acct.name || 'ChatGPT 账号')}</span>
+      <span class="pill ${acct.planUsage ? 'ok' : 'bad'}">${acct.planUsage ? '已登录' + (acct.plan ? ' · ' + esc(acct.plan) : '') : '未开启套餐用量'}</span><span class="grow"></span>${codexSwitch}</div>
+    <p class="lead" style="margin:0 0 12px;font-size:13.5px">
+      ${acct.planUsage ? '律台中符合条件的用量会使用这个账号的 ChatGPT 套餐。' + engine
+        : '这次授权没有包含「使用 ChatGPT 套餐」的权限，律台暂时不能用它完成请求。'}</p>
+    ${acct.planUsage ? '' : `<div class="btn-row" style="margin-bottom:12px">${siwcButton(loginHref({ account: acct.id, consent: true })).replace('Continue with ChatGPT', 'Continue with ChatGPT · 开启套餐用量')}</div>`}
+    ${others.length > 1 ? `<label class="field"><span>当前账号</span><select class="select" id="gpt-account">${others.map((a) => `<option value="${esc(a.id)}"${a.id === acct.id ? ' selected' : ''}>${esc(a.email || a.id)}</option>`).join('')}</select></label>` : ''}
+    ${acct.planUsage ? `<div class="field"><span>可用模型（${models.length}）</span><div class="gpt-models">${models.map((m) => `<span class="pill">${esc(m.name)}</span>`).join('') || '<span class="pill">还没有获取到，点「刷新模型列表」</span>'}</div></div>` : ''}
+    <div class="btn-row">
+      ${acct.planUsage ? '<button class="btn primary small" data-act="test-backend" data-backend="chatgpt">测试连接</button>' : ''}
+      <a class="btn small" href="${esc(g.usageUrl)}" target="_blank" rel="noopener">管理用量</a>
+      ${acct.planUsage ? `<button class="btn small" data-act="gpt-models">${icon('refresh')}刷新模型列表</button>` : ''}
+      <a class="btn small" href="${esc(loginHref())}" target="_blank" rel="noopener" data-login>添加其他账号</a>
+      <button class="btn small danger" data-act="gpt-logout" data-id="${esc(acct.id)}">退出登录</button>
+      <span class="test-out" data-out="chatgpt"></span></div>
+  </div>`;
+}
+
+function planBannerHTML() {
+  if (gptAccount() || S.data.config.chatgpt?.bannerDismissed) return '';
+  return `<div class="plan-banner">${gptLogo()}<div class="t"><b>可以使用你的 ChatGPT 套餐</b><span>登录后，律台里的任务会使用你 ChatGPT 套餐包含的用量，不需要 API Key。</span></div>
+    ${siwcButton(loginHref())}<button class="icon-btn" data-act="gpt-banner-x" title="不再显示">${icon('x')}</button></div>`;
+}
+
+// 浏览器里完成登录后，律台这边轮询结果
+let loginPoll = null;
+function watchLogin(ui) {
+  clearInterval(loginPoll);
+  const until = Date.now() + 10 * 60e3;
+  toast('已在浏览器中打开 ChatGPT 登录页，完成后回到律台即可', 3500);
+  loginPoll = setInterval(async () => {
+    if (Date.now() > until) { clearInterval(loginPoll); return; }
+    const r = await api('/api/chatgpt/login/' + ui).catch(() => null);
+    if (!r || r.status === 'pending' || r.status === 'unknown') return;
+    clearInterval(loginPoll);
+    await refreshState();
+    if (r.status === 'ok' && r.planUsage) {
+      S.sel.backend = 'chatgpt';
+      S.sel.model = '';
+      ensureSel();
+      saveSel();
+    }
+    renderMain();
+    if (r.status === 'error') {
+      const m = modal(`<h3>ChatGPT 登录没有完成</h3><p class="lead" style="margin:0">${esc(r.error)}</p>
+        <div class="btn-row"><button class="btn primary" data-m="ok">知道了</button></div>`);
+      m.onAction = () => m.close();
+    } else if (S.data.chatgpt.welcomePending) showPlanWelcome();
+    else toast(r.planUsage ? `已登录 ChatGPT${r.email ? '（' + r.email + '）' : ''}` : '已登录，但这次授权没有开启 ChatGPT 套餐用量', 3500);
+  }, 1500);
+}
+
+// 第一次开启套餐用量时说明一次
+function showPlanWelcome() {
+  api('/api/chatgpt/welcome', { method: 'POST', body: {} }).then((st) => { S.data.chatgpt = st; }).catch(() => {});
+  // 刚开启套餐用量，默认切到 ChatGPT
+  if (S.sel.backend !== 'chatgpt') {
+    S.sel.backend = 'chatgpt';
+    S.sel.model = '';
+    ensureSel();
+    saveSel();
+    refreshComposer();
+  }
+  const m = modal(`<div class="plan-welcome">${gptLogo()}<h3>你正在使用 ChatGPT 套餐</h3>
+    <p>律台中符合条件的用量将使用你的 ChatGPT 套餐。可以在 ChatGPT 设置中管理用量。</p></div>
+    <div class="btn-row"><a class="btn" href="${esc(S.data.chatgpt.usageUrl)}" target="_blank" rel="noopener">管理用量</a>
+      <button class="btn primary" data-m="ok">知道了</button></div>`);
+  m.onAction = () => m.close();
+}
+
+async function gptLogout(id) {
+  const r = await api('/api/chatgpt/logout', { method: 'POST', body: { account: id } }).catch((e) => ({ error: e.message }));
+  if (r.error) return toast('退出失败：' + r.error, 4000);
+  await refreshState();
+  ensureSel();
+  renderMain();
+  toast(r.revoked ? '已退出 ChatGPT 登录' : '已清除本机的登录信息，但没能确认 OpenAI 已撤销授权。可以在 ChatGPT 设置里断开律台。', r.revoked ? 2400 : 6000);
 }
 
 // ---------------- 检查更新 ----------------
@@ -1240,10 +1381,11 @@ function convMenu(anchor, id) {
 function modelMenu(anchor) {
   let html = '';
   for (const g of backendOptions()) {
-    html += `<div class="grp"><span>${esc(g.label)}</span><span>${g.isApi ? g.sub : g.ok ? g.sub : '未检测到'}</span></div>`;
-    html += g.models.map((m) => mi(g.backend + '|' + m, m || '默认模型', {
+    html += `<div class="grp"><span>${esc(g.label)}</span><span>${g.isApi || g.isPlan ? g.sub : g.ok ? g.sub : '未检测到'}</span></div>`;
+    if (g.isPlan && !g.ok) { html += mi('settings', gptAccount() ? '开启 ChatGPT 套餐用量…' : '用 ChatGPT 账号登录…', { ic: 'plug' }); continue; }
+    html += g.models.map((m) => mi(g.backend + '|' + m, g.names?.[m] || m || '默认模型', {
       checked: S.sel.backend === g.backend && (S.sel.model || '') === m, disabled: !g.ok,
-      desc: m ? '' : { claude: '使用 Claude Code 当前设置的模型', codex: '使用 ~/.codex/config.toml 的模型', codebuddy: 'CodeBuddy 自动选择（auto）' }[g.backend] || '',
+      desc: m ? '' : { claude: '使用 Claude Code 当前设置的模型', codex: '使用 ~/.codex/config.toml 的模型', codebuddy: 'CodeBuddy 自动选择（auto）', chatgpt: '使用账号的第一个可用模型' }[g.backend] || '',
     })).join('');
     if (g.isApi && !g.models.length) html += mi('settings', '未填写模型，去设置', { ic: 'plug' });
   }
@@ -1298,6 +1440,21 @@ document.addEventListener('click', async (e) => {
     case 'show-update': showUpdateModal(); break;
     case 'dismiss-update': dismissUpdate(S.update.latest.version); break;
     case 'check-update': manualCheckUpdate(); break;
+    case 'gpt-logout': gptLogout(el.dataset.id); break;
+    case 'gpt-models': {
+      el.disabled = true;
+      const r = await api('/api/chatgpt/models', { method: 'POST', body: {} }).catch((err) => ({ error: err.message }));
+      if (r.error) { el.disabled = false; toast('获取模型列表失败：' + r.error, 4000); break; }
+      S.data.chatgpt = r;
+      ensureSel();
+      renderMain();
+      toast(`已获取 ${gptAccount()?.models.length || 0} 个模型`);
+      break;
+    }
+    case 'gpt-banner-x':
+      S.data.config = (await api('/api/chatgpt/settings', { method: 'POST', body: { bannerDismissed: true } })).config;
+      renderMain();
+      break;
     case 'toggle-search': S.showSearch = !S.showSearch; if (!S.showSearch) S.search = ''; renderSidebar(); $('#sb-search')?.focus(); break;
     case 'toggle-sidebar': $('#app').classList.toggle('collapsed'); renderMain(); break;
     case 'toggle-projects': S.projectsOpen = !S.projectsOpen; renderSidebar(); break;
@@ -1449,7 +1606,26 @@ for (const id of ['#file-input', '#folder-input']) {
   });
 }
 
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-login]');
+  if (!a) return;
+  const ui = new URL(a.href, location.href).searchParams.get('ui');
+  if (ui) watchLogin(ui);
+  setTimeout(() => { if (S.route.view === 'settings') renderMain(); }, 300); // 换一个新的 ui 标识，方便再次点击
+});
+
 document.addEventListener('change', async (e) => {
+  if (e.target.id === 'gpt-codex') {
+    S.data.config = (await api('/api/chatgpt/settings', { method: 'POST', body: { useCodex: e.target.checked } })).config;
+    renderMain();
+    return;
+  }
+  if (e.target.id === 'gpt-account') {
+    S.data.chatgpt = await api('/api/chatgpt/active', { method: 'POST', body: { account: e.target.value } });
+    ensureSel();
+    renderMain();
+    return;
+  }
   if (e.target.id !== 'upd-auto') return;
   const auto = e.target.checked;
   await api('/api/update', { method: 'POST', body: { auto } }).catch(() => {});
@@ -1470,6 +1646,7 @@ window.addEventListener('hashchange', route);
   }
   if (window.innerWidth < 760) $('#app').classList.add('collapsed');
   await route();
+  if (S.data.chatgpt?.welcomePending) showPlanWelcome();
   // 是否真的联网由服务端决定：关闭了自动检查或 24 小时内查过，就直接返回上次的结果
   setTimeout(() => checkUpdate(), 1500);
 })();

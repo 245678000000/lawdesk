@@ -5,7 +5,7 @@
 一个跑在自己电脑上的法律 Agent 工作台：合同审查、案例研究、事实分析、案件时间线、文书起草……
 
 - **不需要登录**：没有账号体系，只监听 `127.0.0.1`
-- **模型用你自己的**：本机的 Claude Code、Codex、WorkBuddy（不用另装命令行，直接用桌面 App 自带的引擎），或者你自己的 API Key（DeepSeek、Kimi、通义、OpenAI、Anthropic、Ollama 等）
+- **模型用你自己的**：用 ChatGPT 账号登录、使用你的 ChatGPT 套餐；本机的 Claude Code、Codex、WorkBuddy（不用另装命令行，直接用桌面 App 自带的引擎）；或者你自己的 API Key（DeepSeek、Kimi、通义、OpenAI、Anthropic、Ollama 等）
 - **数据全在本地**：对话、上传的材料、生成的文件都在你自己的电脑上
 - **零依赖**：Node.js 原生实现，没有 npm 包；另有 Mac 和 Windows 客户端
 
@@ -20,7 +20,7 @@
 | macOS（Apple 芯片） | `LawDesk-<版本>-arm64.dmg` | 打开后把「律台」拖进「应用程序」。App 没有经过 Apple 公证，第一次打开请在访达里右键 →「打开」 |
 | Windows 10 / 11（x64） | `LawDesk-Setup-<版本>-x64.exe` | 双击安装。安装包没有代码签名，如果出现「Windows 已保护你的电脑」，点「更多信息 → 仍要运行」 |
 
-使用 Claude Code / Codex 之前，先在终端（Windows 上是 PowerShell）里确认 `claude`、`codex` 能正常对话；只装了 WorkBuddy 的话，见下面的「用 WorkBuddy」。
+最简单的用法：在「模型与连接」里点 **Continue with ChatGPT**，用你的 ChatGPT 账号登录（见下面的「用 ChatGPT 套餐」）。使用 Claude Code / Codex 之前，先在终端（Windows 上是 PowerShell）里确认 `claude`、`codex` 能正常对话；只装了 WorkBuddy 的话，见「用 WorkBuddy」。
 
 ## 从源码运行
 
@@ -67,6 +67,7 @@ npm run dist     # 打包出 dist/LawDesk-Setup-<版本>-x64.exe（在 macOS 上
 
 | 来源 | 能力 | 用到的命令 / 接口 |
 |---|---|---|
+| ChatGPT 套餐 | 本机有 Codex 时同 Codex（读写文件、多步任务）；否则纯对话，图片原样发送 | 「Sign in with ChatGPT」登录后经 Codex，或直接调用 Responses API |
 | Claude Code（本机） | 读写本地文件、执行多步任务、联网检索、生成 HTML/Word 等交付物 | `claude -p --output-format stream-json` |
 | Codex（本机） | 同上 | `codex exec --json`；没单独安装时自动用 ChatGPT 桌面版（macOS）自带的 Codex |
 | WorkBuddy（本机） | 同上 | WorkBuddy 桌面版自带的 CodeBuddy 引擎，或单独安装的 `codebuddy` 命令 |
@@ -77,6 +78,16 @@ npm run dist     # 打包出 dist/LawDesk-Setup-<版本>-x64.exe（在 macOS 上
 - 两个 CLI 沿用你在终端里的登录状态和配置（`~/.claude`、`~/.codex`），先在终端里确认 `claude`、`codex` 能正常对话。
 - 想让 CLI 走你自己的 API：在「模型与连接」里给 Claude Code 填环境变量，例如 `ANTHROPIC_BASE_URL=…`、`ANTHROPIC_AUTH_TOKEN=…`；Codex 同理。
 - 自有 API 内置了 DeepSeek、Kimi、通义千问、智谱、OpenAI、Anthropic、OpenRouter、Ollama 预设，填 Key 和模型名即可，每个都可以点「测试连接」。
+
+## 用 ChatGPT 套餐
+
+律台按 OpenAI 官方的 [Sign in with ChatGPT（开源与本地应用使用 ChatGPT 套餐）](https://developers.openai.com/siwc/token-sharing-open-source) 流程接入：在「模型与连接」或首页点 **Continue with ChatGPT**，在浏览器里登录 ChatGPT 并同意授权，回到律台就能用。不需要 API Key，也不需要另装任何东西。
+
+- **用量**：律台中符合条件的请求会使用你 ChatGPT 套餐包含的用量（或 credits 余额），可以在 [ChatGPT 设置 → 用量](https://chatgpt.com/settings/usage) 查看，并给律台单独设上限。律台本身免费，不另外收费。
+- **怎么执行**：本机装了 Codex（命令行或 ChatGPT 桌面版自带的）时，律台把登录得到的令牌交给 Codex，按官方文档的提供方配置运行，能读取案卷、在工作区生成文件，权限和 Codex 一样分三档；没有 Codex 时直接调用 Responses API，是纯对话（附件转成文字，图片原样发送）。可以在设置里关掉「有 Codex 时通过 Codex 执行」。
+- **隐私**：律台只拿到调用模型的授权，看不到你在 ChatGPT 里的对话。令牌保存在数据目录的 `chatgpt/` 下（仅本人可读写），不进浏览器存储、不写日志；访问令牌一小时有效，过期前自动刷新。
+- **退出**：设置里点「退出登录」会向 OpenAI 撤销授权并清除本机令牌；也可以在 ChatGPT 设置里断开律台。支持多个账号或工作区，可以随时切换。
+- **限制**：这项能力目前是 OpenAI 的预览版，可用的模型以登录后获取到的列表为准；部分账号、工作区或地区可能不支持。达到用量上限时律台会提示并给出「管理用量」入口，不会自动改用别的付费方式。
 
 ## 用 WorkBuddy
 
@@ -121,20 +132,21 @@ lib/skills.js      内置技能、首页示例
 lib/store.js       data/ 下的 JSON 存储
 lib/extract.js     API 模式下的附件转文字（textutil、pdftotext）
 lib/update.js      检查更新（查询 GitHub 最新发布版本）
-public/            前端（原生 JS，无构建步骤）
+lib/chatgpt.js     ChatGPT 套餐：Sign in with ChatGPT 登录、令牌刷新、Responses API、交给 Codex 的配置
+public/            前端（原生 JS，无构建步骤）；public/brand/ 是 OpenAI 提供的 ChatGPT 标志
 mac/               Mac 客户端：main.swift（窗口外壳）、make-icon.swift（图标）、build.sh（打包 dmg）
 windows/           Windows 客户端：main.cjs / preload.cjs（Electron 外壳）、build.mjs（打包安装包）
 test/              smoke.mjs（服务冒烟测试，npm test）、e2e-desktop.mjs（桌面客户端端到端测试）
 dist/              打包产物：律台.app、*.dmg、*.exe
-data/              运行后生成：config.json、conversations/、workspaces/、memory.md、update.json
+data/              运行后生成：config.json、conversations/、workspaces/、memory.md、update.json、chatgpt/
 ```
 
 ## 注意
 
-- API Key 以明文保存在 `data/config.json`，不要把 `data/` 分享给别人。
+- API Key 以明文保存在 `data/config.json`，ChatGPT 登录令牌在 `data/chatgpt/`，不要把 `data/` 分享给别人。
 - 扫描版 PDF 在 API 模式下读不出文字，用 CLI 模式或先 OCR。
 - 输出仅供专业人员参考，法条与案例请自行核实。
 
 ## 许可证
 
-[MIT](LICENSE)
+[MIT](LICENSE)。`public/brand/` 里的 ChatGPT 标志是 OpenAI 的商标，按 OpenAI 的 Sign in with ChatGPT 品牌规范使用，不在 MIT 许可范围内。
