@@ -46,7 +46,8 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 #app { display: flex; height: 100vh; }
 
 /* ---------------- 侧边栏 ---------------- */
-#sidebar { width: 300px; flex: none; display: flex; flex-direction: column; background: var(--sidebar); padding: 14px 12px 12px; overflow: hidden; transition: margin .2s; }
+/* clip：侧栏本身永远不会被横向滚动（hidden 仍可能因为获得焦点被滚动，导致左边被裁掉） */
+#sidebar { width: 300px; flex: none; display: flex; flex-direction: column; background: var(--sidebar); padding: 14px 12px 12px; overflow: hidden; overflow: clip; transition: margin .2s; }
 #app.collapsed #sidebar { margin-left: -300px; }
 .sb-top { display: flex; align-items: center; gap: 6px; padding: 2px 6px 14px; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 16px; flex: 1; }
@@ -75,18 +76,20 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 .conv-item .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); flex: none; animation: pulse 1.2s infinite; }
 .conv-item svg.i { width: 16px; height: 16px; color: var(--muted); }
 @keyframes pulse { 50% { opacity: .3; } }
-.sb-bottom { padding-top: 10px; display: grid; gap: 8px; }
+.sb-bottom { padding-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .upd-card { display: flex; align-items: center; gap: 2px; padding: 4px 4px 4px 0; border-radius: 12px; background: var(--upd-bg); color: var(--upd-fg); }
 .upd-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 6px 0 6px 14px; text-align: left; font-size: 13.5px; font-weight: 500; color: inherit; }
 .upd-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .upd-card .icon-btn { color: inherit; opacity: .7; }
 .upd-card .icon-btn:hover { opacity: 1; }
-.local-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--hover); text-align: left; width: 100%; }
+.local-card { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--hover); text-align: left; width: 100%; min-width: 0; }
+.local-card > svg.i { flex: none; }
 .local-card:hover { background: var(--active); }
 .local-card .sub { font-size: 12.5px; color: var(--muted); }
-.local-card .st { display: flex; margin-top: 2px; min-width: 0; }
-.local-card .st .badge { min-width: 0; }
+.local-card .st { display: flex; margin-top: 3px; min-width: 0; }
+.local-card .st .badge { display: flex; min-width: 0; }
 .local-card .st .badge::before { flex: none; }
+.local-card .st .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
 .badge.on::before { background: var(--ok); }

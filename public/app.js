@@ -275,8 +275,10 @@ function renderSidebar() {
     : '<div class="sb-empty">还没有项目，点击侧栏上方<br>「新建项目」</div>';
 
   const apiCount = config.providers.length;
-  const connected = [gptAccount()?.planUsage && 'ChatGPT', clis.claude?.found && 'Claude Code', clis.codex?.found && 'Codex',
-    apiCount && (apiCount > 1 ? `API ×${apiCount}` : 'API')].filter(Boolean);
+  // 侧栏放不下全称，用短名；完整名称放在悬停提示里
+  const sources = [gptAccount()?.planUsage && ['ChatGPT', 'ChatGPT 套餐'], clis.claude?.found && ['Claude', 'Claude Code'],
+    clis.codex?.found && ['Codex', 'Codex'], apiCount && [apiCount > 1 ? `API ×${apiCount}` : 'API', `自有 API ${apiCount} 个`]].filter(Boolean);
+  const connected = sources.map((x) => x[0]);
   const upd = S.update;
   const updHTML = upd?.hasUpdate && upd.dismissed !== upd.latest.version
     ? `<div class="upd-card"><button class="upd-main" data-act="show-update">${icon('download')}<span>新版本 v${esc(upd.latest.version)} 可以更新</span></button>
@@ -307,7 +309,7 @@ function renderSidebar() {
         ${icon('laptop')}
         <div style="flex:1;min-width:0">
           <div>本地模式 · 无需登录</div>
-          <div class="st" title="${esc(connected.join('、'))}"><span class="badge${connected.length ? ' on' : ''}">${connected.length ? connected.join(' · ') : '还没有连接模型'}</span></div>
+          <div class="st" title="${esc(sources.map((x) => x[1]).join('、'))}"><span class="badge${connected.length ? ' on' : ''}"><span class="t">${connected.length ? connected.join(' · ') : '还没有连接模型'}</span></span></div>
         </div>
         ${icon('right')}
       </button>
