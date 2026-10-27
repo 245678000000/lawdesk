@@ -2,8 +2,7 @@
 // 启动本地服务（独立的临时数据目录），检查：CLI 检测、Word 附件上传与转文字、自有 API 流式对话、
 // 文件下载、检查更新（模拟 GitHub 接口），以及本机装了 claude / codex 时能否真正把它们拉起来
 // （不要求已登录，只要求没有启动错误）。
-// 设置 EXPECT_CLIS=claude,codex,codebuddy 时要求这些命令都能检测到（CI 里会先用 npm 全局安装它们）；
-// 设置 EXPECT_WORKBUDDY=1 时要求能找到 WorkBuddy 桌面版自带的引擎（CI 里用官方 CodeBuddy 包模拟安装目录）；
+// 设置 EXPECT_CLIS=claude,codex 时要求这些命令都能检测到（CI 里会先用 npm 全局安装它们）；
 // 设置 TEST_CLI_CALLS=1 时才真正调用它们（会消耗你账号的额度，所以本地默认不跑）。
 // ChatGPT 套餐用本地模拟的 OpenAI 登录与 Responses 接口走完整流程；本机有 Codex 时也验证经 Codex 的调用。
 import { spawn } from 'node:child_process';
@@ -187,8 +186,8 @@ try {
     'npm → exe': [head + '"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*\r\n',
       'node_modules/@anthropic-ai/claude-code/bin/claude.exe'],
     'npm → 无扩展名 node 脚本': [head + 'IF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n) ELSE (\r\n  SET "_prog=node"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n' +
-      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@tencent-ai\\codebuddy-code\\bin\\codebuddy" %*\r\n',
-      'node_modules/@tencent-ai/codebuddy-code/bin/codebuddy'],
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\some-cli\\bin\\some-cli" %*\r\n',
+      'node_modules/some-cli/bin/some-cli'],
     'pnpm → js': ['@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe"  "%~dp0\\..\\@anthropic-ai\\claude-code\\cli.js" %*\r\n) ELSE (\r\n  node  "%~dp0\\..\\@anthropic-ai\\claude-code\\cli.js" %*\r\n)\r\n',
       '@anthropic-ai/claude-code/cli.js'],
   };
@@ -202,23 +201,12 @@ try {
   const state = await api('/api/state');
   assert.equal(state.platform, process.platform);
   log('平台', state.platform);
-  for (const name of ['claude', 'codex', 'codebuddy']) log(name, JSON.stringify(state.clis[name]));
+  for (const name of ['claude', 'codex']) log(name, JSON.stringify(state.clis[name]));
   if (process.env.EXPECT_CLIS) {
     for (const name of process.env.EXPECT_CLIS.split(',').map((x) => x.trim()).filter(Boolean)) {
       assert.ok(state.clis[name].found, `${name} 应该被检测到`);
       assert.ok(state.clis[name].version, `${name} --version 应该能执行（Windows 上验证 .cmd 包装脚本解析）`);
     }
-  }
-
-  // 1b. WorkBuddy 桌面版自带的引擎：按安装目录找到并能用它的运行时执行
-  if (process.env.EXPECT_WORKBUDDY === '1') {
-    const { findWorkBuddy } = await import('../lib/cli.js');
-    const wb = findWorkBuddy();
-    assert.ok(wb, '应该找到 WorkBuddy 安装目录里的引擎');
-    const { execFileSync } = await import('node:child_process');
-    const out = execFileSync(wb.cmd, [...wb.pre, '--version'], { env: { ...process.env, ...wb.env }, encoding: 'utf8', timeout: 60000, windowsHide: true });
-    assert.match(out, /\d+\.\d+\.\d+/, 'WorkBuddy 内置引擎应能输出版本号');
-    log('WorkBuddy 内置引擎：', wb.cmd, '→', out.trim().split('\n').pop());
   }
 
   // 2. 自有 API + Word 附件
@@ -370,7 +358,7 @@ try {
   }
 
   // 3. 真正拉起 CLI（没登录也没关系，只要不是“找不到 / 无法启动”）
-  for (const name of ['codex', 'claude', 'codebuddy']) {
+  for (const name of ['codex', 'claude']) {
     if (process.env.TEST_CLI_CALLS !== '1') { log(name, '调用测试未开启（TEST_CLI_CALLS=1）'); continue; }
     if (!state.clis[name].found) { log(name, '未安装，跳过调用测试'); continue; }
     const c = await chat({ text: '只回复两个字：正常', backend: name, permission: 'readonly' }, 60000);

@@ -117,11 +117,6 @@ function backendOptions() {
     groups.push({ backend: 'claude', label: 'Claude Code', sub: '本机 CLI', ok: clis.claude?.found,
       models: ['', ...config.claude.models] });
   }
-  if (config.codebuddy.enabled !== false) {
-    groups.push({ backend: 'codebuddy', label: 'WorkBuddy', ok: clis.codebuddy?.found,
-      sub: clis.codebuddy?.source === 'workbuddy' ? 'WorkBuddy 内置引擎' : '本机 CLI',
-      models: ['', ...config.codebuddy.models] });
-  }
   if (config.codex.enabled !== false) {
     groups.push({ backend: 'codex', label: 'Codex', sub: clis.codex?.source === 'chatgpt' ? 'ChatGPT 内置' : '本机 CLI', ok: clis.codex?.found,
       models: ['', ...config.codex.models] });
@@ -153,7 +148,7 @@ function ensureSel() {
 const isApiBackend = (b) => String(b).startsWith('api:');
 function backendLabel(backend, model) {
   const g = backendOptions().find((x) => x.backend === backend);
-  const name = g ? g.label : { claude: 'Claude Code', codex: 'Codex', codebuddy: 'WorkBuddy', chatgpt: 'ChatGPT' }[backend] || '已删除的 API';
+  const name = g ? g.label : { claude: 'Claude Code', codex: 'Codex', chatgpt: 'ChatGPT', codebuddy: 'WorkBuddy' }[backend] || '已删除的 API';
   return model ? `${name} · ${g?.names?.[model] || model}` : name;
 }
 const PERMS = {
@@ -280,6 +275,8 @@ function renderSidebar() {
     : '<div class="sb-empty">还没有项目，点击侧栏上方<br>「新建项目」</div>';
 
   const apiCount = config.providers.length;
+  const connected = [gptAccount()?.planUsage && 'ChatGPT', clis.claude?.found && 'Claude Code', clis.codex?.found && 'Codex',
+    apiCount && (apiCount > 1 ? `API ×${apiCount}` : 'API')].filter(Boolean);
   const upd = S.update;
   const updHTML = upd?.hasUpdate && upd.dismissed !== upd.latest.version
     ? `<div class="upd-card"><button class="upd-main" data-act="show-update">${icon('download')}<span>新版本 v${esc(upd.latest.version)} 可以更新</span></button>
@@ -310,13 +307,7 @@ function renderSidebar() {
         ${icon('laptop')}
         <div style="flex:1;min-width:0">
           <div>本地模式 · 无需登录</div>
-          <div class="st">
-            <span class="badge${clis.claude?.found ? ' on' : ''}">Claude Code</span>
-            <span class="badge${clis.codex?.found ? ' on' : ''}">Codex</span>
-            <span class="badge${clis.codebuddy?.found ? ' on' : ''}">WorkBuddy</span>
-            <span class="badge${gptAccount()?.planUsage ? ' on' : ''}">ChatGPT</span>
-            <span class="badge${apiCount ? ' on' : ''}">API ${apiCount || ''}</span>
-          </div>
+          <div class="st" title="${esc(connected.join('、'))}"><span class="badge${connected.length ? ' on' : ''}">${connected.length ? connected.join(' · ') : '还没有连接模型'}</span></div>
         </div>
         ${icon('right')}
       </button>
@@ -347,24 +338,24 @@ function composerHTML(placeholder) {
     <div class="cmp-row">
       <button class="icon-btn" data-act="attach-menu" title="添加文件或文件夹">${icon('plus')}</button>
       ${S.route.view === 'chat' ? `<button class="pick" data-act="skill-menu">${icon('wand')}技能</button>` : ''}
+      <span class="plan-note" id="plan-note">${planNoteHTML()}</span>
       <div class="grow"></div>
       <span id="pickers">${pickersHTML()}</span>
       <button class="icon-btn mic${recognizing ? ' on' : ''}${SpeechRec ? '' : ' hidden'}" data-act="mic" title="语音输入">${icon('mic')}</button>
       <button class="send-btn" id="send-btn" data-act="send">${icon('up')}</button>
     </div>
-    <div class="plan-note" id="plan-note">${planNoteHTML()}</div>
   </div>`;
 }
 
 // 用 ChatGPT 套餐时，在输入框下方说明并给出「管理用量」入口
 function planNoteHTML() {
   if (S.sel.backend !== 'chatgpt' || !gptAccount()?.planUsage) return '';
-  return `${gptLogo()}<span>正在使用 ChatGPT 套餐</span><a href="${esc(S.data.chatgpt.usageUrl)}" target="_blank" rel="noopener">管理用量</a>`;
+  return `${gptLogo()}<span class="t">正在使用 ChatGPT 套餐</span><a href="${esc(S.data.chatgpt.usageUrl)}" target="_blank" rel="noopener">管理用量</a>`;
 }
 
 function pickersHTML() {
   const api = isApiBackend(S.sel.backend) || (S.sel.backend === 'chatgpt' && !gptViaCodex());
-  return `<button class="pick" data-act="model-menu">${esc(backendLabel(S.sel.backend, S.sel.model || ''))}${S.sel.model ? '' : ' · 默认'}${icon('down')}</button>` +
+  return `<button class="pick model-pick" data-act="model-menu"><span class="lbl">${esc(backendLabel(S.sel.backend, S.sel.model || ''))}${S.sel.model ? '' : ' · 默认'}</span>${icon('down')}</button>` +
     (api ? '<span class="pick static" title="自有 API 为纯对话模式，附件会转成文字发送">纯对话</span>'
       : `<button class="pick" data-act="perm-menu">${PERMS[S.sel.permission].label}${icon('down')}</button>`);
 }
@@ -948,9 +939,9 @@ const PRESETS = [
   { name: '自定义', type: 'openai', baseUrl: '', models: '' },
 ];
 
-const SOURCE_NAMES = { workbuddy: 'WorkBuddy 内置引擎 ', chatgpt: 'ChatGPT 内置 ' };
+const SOURCE_NAMES = { chatgpt: 'ChatGPT 内置 ' };
 
-function cliCardHTML(key, title, desc, envHint, extraHTML = '') {
+function cliCardHTML(key, title, desc, envHint) {
   const cfg = S.data.config[key];
   const st = S.data.clis[key] || {};
   return `<div class="card" data-cli="${key}">
@@ -959,27 +950,18 @@ function cliCardHTML(key, title, desc, envHint, extraHTML = '') {
       <span class="grow"></span>
       <label class="switch"><input type="checkbox" name="enabled"${cfg.enabled !== false ? ' checked' : ''}>显示在模型列表</label></div>
     <p class="lead" style="margin:0 0 12px;font-size:13.5px">${desc}${st.path ? `<br><span class="mono-path">${esc(st.path)}</span>` : ''}</p>
+    <details class="adv"${cfg.bin || cfg.env ? ' open' : ''}><summary>${icon('right')}高级设置<span>命令路径、可选模型、环境变量</span></summary>
     <div class="grid2">
       <label class="field"><span>命令路径（可选）</span><input class="input mono" name="bin" value="${esc(cfg.bin)}" placeholder="留空自动查找"></label>
       <label class="field"><span>可选模型（逗号分隔）</span><input class="input" name="models" value="${esc(cfg.models.join(', '))}" placeholder="留空则只用 CLI 默认模型"></label>
     </div>
-    ${extraHTML}
     <label class="field"><span>额外环境变量（每行一个 KEY=VALUE，可让 CLI 使用你自己的 API）</span>
       <textarea class="textarea mono" name="env" rows="3" placeholder="${esc(envHint)}">${esc(cfg.env)}</textarea></label>
+    </details>
     <div class="btn-row"><button class="btn primary small" data-act="save-cli" data-key="${key}">保存</button>
       <button class="btn small" data-act="test-backend" data-backend="${key}">测试连接</button>
       <span class="test-out" data-out="${key}"></span></div>
   </div>`;
-}
-
-function codebuddyFieldsHTML() {
-  const cfg = S.data.config.codebuddy;
-  return `<div class="grid2">
-      <label class="field"><span>CodeBuddy API Key</span><input class="input mono" name="apiKey" value="${esc(cfg.apiKey)}" placeholder="在 CodeBuddy 官网创建" autocomplete="off"></label>
-      <label class="field"><span>账号版本</span><select class="select" name="region">
-        <option value="cn"${cfg.region !== 'intl' ? ' selected' : ''}>中国版（workbuddy.cn / codebuddy.cn）</option>
-        <option value="intl"${cfg.region === 'intl' ? ' selected' : ''}>国际版（workbuddy.ai / codebuddy.ai）</option></select></label>
-    </div>`;
 }
 
 function providerCardHTML(p) {
@@ -1007,18 +989,13 @@ function settingsHTML() {
   const { config, dataDir } = S.data;
   return `<div class="page"><div class="page-inner">
     <h1>模型与连接</h1>
-    <p class="lead">不需要注册律台账号。可以用 ChatGPT 账号登录、使用你的 ChatGPT 套餐；也可以用本机的 Claude Code、Codex 或 WorkBuddy（能读写本地文件、执行多步任务，没单独装命令行工具时会自动使用桌面 App 自带的引擎）；或者填自己的 API Key（纯对话）。</p>
+    <p class="lead">不需要注册律台账号。用 ChatGPT 套餐、本机的 Claude Code / Codex，或自己的 API Key，选一种即可。</p>
     <h2>ChatGPT 套餐</h2>
     ${chatgptCardHTML()}
     <h2>本机命令行智能体</h2>
     ${cliCardHTML('claude', 'Claude Code', '调用 <code>claude -p</code>。沿用你在终端里的登录状态和 ~/.claude 配置。',
       'ANTHROPIC_BASE_URL=https://your-proxy.example.com\nANTHROPIC_AUTH_TOKEN=sk-…\nANTHROPIC_MODEL=…')}
     ${cliCardHTML('codex', 'Codex', '调用 <code>codex exec</code>。沿用 ~/.codex 的登录状态和 config.toml；没单独安装时，会自动使用 ChatGPT 桌面版（macOS）里自带的 Codex。', 'OPENAI_API_KEY=sk-…\nOPENAI_BASE_URL=https://…')}
-    ${cliCardHTML('codebuddy', 'WorkBuddy',
-      '装了 WorkBuddy 桌面版就能用，不需要另装命令行工具：律台会直接调用 WorkBuddy 自带的 CodeBuddy 引擎（也支持单独安装的 <code>codebuddy</code> 命令）。' +
-      '<br>WorkBuddy 桌面版的登录状态不能共用，需要填一个 CodeBuddy API Key：用你的 WorkBuddy 账号登录 CodeBuddy 官网创建，' +
-      '<a href="https://www.codebuddy.cn/docs/cli/iam" target="_blank" rel="noopener">查看官方说明</a>。',
-      'CODEBUDDY_BASE_URL=https://…（使用第三方模型服务时）', codebuddyFieldsHTML())}
     <h2>自有 API</h2>
     ${config.providers.map(providerCardHTML).join('') || '<p class="lead" style="margin-bottom:12px">还没有添加。</p>'}
     <div class="btn-row"><select class="select" id="preset" style="width:auto">${PRESETS.map((p, i) => `<option value="${i}">${p.name}</option>`).join('')}</select>
@@ -1045,7 +1022,8 @@ function loginHref({ account, consent } = {}) {
   const ui = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   return `/auth/chatgpt/start?ui=${ui}${account ? '&account=' + encodeURIComponent(account) : ''}${consent ? '&consent=1' : ''}`;
 }
-const siwcButton = (href) => `<a class="siwc-btn" href="${esc(href)}" target="_blank" rel="noopener" data-login>
+// light：浅色背景上用白色款（深色模式下用黑色款），用于不需要突出的位置
+const siwcButton = (href, { light } = {}) => `<a class="siwc-btn${light ? ' light' : ''}" href="${esc(href)}" target="_blank" rel="noopener" data-login>
   <img class="lw" src="/brand/chatgpt-logo-white.svg" alt=""><img class="lb" src="/brand/chatgpt-logo-black.svg" alt=""><span>Continue with ChatGPT</span></a>`;
 
 function chatgptCardHTML() {
@@ -1078,21 +1056,21 @@ function chatgptCardHTML() {
         : '这次授权没有包含「使用 ChatGPT 套餐」的权限，律台暂时不能用它完成请求。'}</p>
     ${acct.planUsage ? '' : `<div class="btn-row" style="margin-bottom:12px">${siwcButton(loginHref({ account: acct.id, consent: true })).replace('Continue with ChatGPT', 'Continue with ChatGPT · 开启套餐用量')}</div>`}
     ${others.length > 1 ? `<label class="field"><span>当前账号</span><select class="select" id="gpt-account">${others.map((a) => `<option value="${esc(a.id)}"${a.id === acct.id ? ' selected' : ''}>${esc(a.email || a.id)}</option>`).join('')}</select></label>` : ''}
-    ${acct.planUsage ? `<div class="field"><span>可用模型（${models.length}）</span><div class="gpt-models">${models.map((m) => `<span class="pill">${esc(m.name)}</span>`).join('') || '<span class="pill">还没有获取到，点「刷新模型列表」</span>'}</div></div>` : ''}
+    ${acct.planUsage ? `<div class="field"><span class="with-act">可用模型（${models.length}）<button class="icon-btn mini" data-act="gpt-models" title="刷新模型列表">${icon('refresh')}</button></span>
+      <div class="gpt-models">${models.map((m) => `<span class="pill">${esc(m.name)}</span>`).join('') || '<span class="pill">还没有获取到，点右上角刷新</span>'}</div></div>` : ''}
     <div class="btn-row">
       ${acct.planUsage ? '<button class="btn primary small" data-act="test-backend" data-backend="chatgpt">测试连接</button>' : ''}
       <a class="btn small" href="${esc(g.usageUrl)}" target="_blank" rel="noopener">管理用量</a>
-      ${acct.planUsage ? `<button class="btn small" data-act="gpt-models">${icon('refresh')}刷新模型列表</button>` : ''}
-      <a class="btn small" href="${esc(loginHref())}" target="_blank" rel="noopener" data-login>添加其他账号</a>
-      <button class="btn small danger" data-act="gpt-logout" data-id="${esc(acct.id)}">退出登录</button>
-      <span class="test-out" data-out="chatgpt"></span></div>
+      <span class="test-out" data-out="chatgpt"></span><span class="grow"></span>
+      <a class="text-act" href="${esc(loginHref())}" target="_blank" rel="noopener" data-login>添加账号</a>
+      <button class="text-act" data-act="gpt-logout" data-id="${esc(acct.id)}">退出登录</button></div>
   </div>`;
 }
 
 function planBannerHTML() {
   if (gptAccount() || S.data.config.chatgpt?.bannerDismissed) return '';
   return `<div class="plan-banner">${gptLogo()}<div class="t"><b>可以使用你的 ChatGPT 套餐</b><span>登录后，律台里的任务会使用你 ChatGPT 套餐包含的用量，不需要 API Key。</span></div>
-    ${siwcButton(loginHref())}<button class="icon-btn" data-act="gpt-banner-x" title="不再显示">${icon('x')}</button></div>`;
+    ${siwcButton(loginHref(), { light: true })}<button class="icon-btn" data-act="gpt-banner-x" title="不再显示">${icon('x')}</button></div>`;
 }
 
 // 浏览器里完成登录后，律台这边轮询结果
@@ -1385,7 +1363,7 @@ function modelMenu(anchor) {
     if (g.isPlan && !g.ok) { html += mi('settings', gptAccount() ? '开启 ChatGPT 套餐用量…' : '用 ChatGPT 账号登录…', { ic: 'plug' }); continue; }
     html += g.models.map((m) => mi(g.backend + '|' + m, g.names?.[m] || m || '默认模型', {
       checked: S.sel.backend === g.backend && (S.sel.model || '') === m, disabled: !g.ok,
-      desc: m ? '' : { claude: '使用 Claude Code 当前设置的模型', codex: '使用 ~/.codex/config.toml 的模型', codebuddy: 'CodeBuddy 自动选择（auto）', chatgpt: '使用账号的第一个可用模型' }[g.backend] || '',
+      desc: m ? '' : { claude: '使用 Claude Code 当前设置的模型', codex: '使用 ~/.codex/config.toml 的模型', chatgpt: '使用账号的第一个可用模型' }[g.backend] || '',
     })).join('');
     if (g.isApi && !g.models.length) html += mi('settings', '未填写模型，去设置', { ic: 'plug' });
   }
@@ -1549,8 +1527,7 @@ document.addEventListener('click', async (e) => {
     case 'save-cli': {
       const key = el.dataset.key;
       const f = readCard(el.closest('.card'));
-      const extra = key === 'codebuddy' ? { apiKey: f.apiKey, region: f.region } : {};
-      await saveConfig({ ...S.data.config, [key]: { ...S.data.config[key], enabled: f.enabled, bin: f.bin.trim(), models: splitList(f.models), env: f.env, ...extra } });
+      await saveConfig({ ...S.data.config, [key]: { ...S.data.config[key], enabled: f.enabled, bin: f.bin.trim(), models: splitList(f.models), env: f.env } });
       renderMain();
       toast('已保存');
       break;
