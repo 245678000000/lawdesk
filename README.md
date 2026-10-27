@@ -5,7 +5,7 @@
 一个跑在自己电脑上的法律 Agent 工作台：合同审查、案例研究、事实分析、案件时间线、文书起草……
 
 - **不需要登录**：没有账号体系，只监听 `127.0.0.1`
-- **模型用你自己的**：本机已装好的 Claude Code / Codex 命令行，或者你自己的 API Key（DeepSeek、Kimi、通义、OpenAI、Anthropic、Ollama 等）
+- **模型用你自己的**：本机的 Claude Code、Codex、WorkBuddy（不用另装命令行，直接用桌面 App 自带的引擎），或者你自己的 API Key（DeepSeek、Kimi、通义、OpenAI、Anthropic、Ollama 等）
 - **数据全在本地**：对话、上传的材料、生成的文件都在你自己的电脑上
 - **零依赖**：Node.js 原生实现，没有 npm 包；另有 Mac 和 Windows 客户端
 
@@ -20,7 +20,7 @@
 | macOS（Apple 芯片） | `LawDesk-<版本>-arm64.dmg` | 打开后把「律台」拖进「应用程序」。App 没有经过 Apple 公证，第一次打开请在访达里右键 →「打开」 |
 | Windows 10 / 11（x64） | `LawDesk-Setup-<版本>-x64.exe` | 双击安装。安装包没有代码签名，如果出现「Windows 已保护你的电脑」，点「更多信息 → 仍要运行」 |
 
-使用 Claude Code / Codex 之前，先在终端（Windows 上是 PowerShell）里确认 `claude`、`codex` 能正常对话。
+使用 Claude Code / Codex 之前，先在终端（Windows 上是 PowerShell）里确认 `claude`、`codex` 能正常对话；只装了 WorkBuddy 的话，见下面的「用 WorkBuddy」。
 
 ## 从源码运行
 
@@ -63,17 +63,33 @@ npm run dist     # 打包出 dist/LawDesk-Setup-<版本>-x64.exe（在 macOS 上
 - 关闭窗口时，后台服务和正在运行的 claude / codex 进程会一并结束。
 - 每次推送都会在 GitHub Actions 的 Windows、macOS、Linux 上跑冒烟测试，并在 Windows 上打包、静默安装、启动安装后的 App 做端到端测试（`test/`）。
 
-## 三种模型来源
+## 模型来源
 
 | 来源 | 能力 | 用到的命令 / 接口 |
 |---|---|---|
 | Claude Code（本机） | 读写本地文件、执行多步任务、联网检索、生成 HTML/Word 等交付物 | `claude -p --output-format stream-json` |
-| Codex（本机） | 同上 | `codex exec --json` |
+| Codex（本机） | 同上 | `codex exec --json`；没单独安装时自动用 ChatGPT 桌面版（macOS）自带的 Codex |
+| WorkBuddy（本机） | 同上 | WorkBuddy 桌面版自带的 CodeBuddy 引擎，或单独安装的 `codebuddy` 命令 |
 | 自有 API | 纯对话；附件（PDF/Word/TXT）先转成文字再发送 | OpenAI 兼容 `/chat/completions` 或 Anthropic `/v1/messages` |
+
+律台按「设置里填的路径 → 单独安装的命令行工具 → 桌面 App 自带的引擎」的顺序查找，所以很多人不需要另外安装任何命令行工具。
 
 - 两个 CLI 沿用你在终端里的登录状态和配置（`~/.claude`、`~/.codex`），先在终端里确认 `claude`、`codex` 能正常对话。
 - 想让 CLI 走你自己的 API：在「模型与连接」里给 Claude Code 填环境变量，例如 `ANTHROPIC_BASE_URL=…`、`ANTHROPIC_AUTH_TOKEN=…`；Codex 同理。
 - 自有 API 内置了 DeepSeek、Kimi、通义千问、智谱、OpenAI、Anthropic、OpenRouter、Ollama 预设，填 Key 和模型名即可，每个都可以点「测试连接」。
+
+## 用 WorkBuddy
+
+装了 WorkBuddy 桌面版（macOS 的 `/Applications/WorkBuddy.app`，Windows 的 `%LOCALAPPDATA%\Programs\WorkBuddy`）就会被自动识别，律台直接调用它自带的 CodeBuddy 引擎（用 WorkBuddy 自己的运行时启动），不需要安装 Node 或 CodeBuddy 命令行。
+
+**登录**：WorkBuddy 桌面版的登录状态由 WorkBuddy 自己管理，不能直接给其他软件用（读取它保存的登录凭据属于非官方用法，有账号被风控的风险，律台不会这样做）。官方支持的方式是 **CodeBuddy API Key**：
+
+1. 用你的 WorkBuddy 账号登录 CodeBuddy 官网，创建一个 API Key（[官方说明](https://www.codebuddy.cn/docs/cli/iam)）。
+2. 在律台「模型与连接 → WorkBuddy」里填入 API Key，「账号版本」选中国版（workbuddy.cn / codebuddy.cn）或国际版（workbuddy.ai / codebuddy.ai），点「测试连接」。
+
+律台会按官方文档设置 `CODEBUDDY_API_KEY` 和 `CODEBUDDY_INTERNET_ENVIRONMENT`。如果你单独安装了 CodeBuddy 命令行（`npm i -g @tencent-ai/codebuddy-code`）并在终端里运行 `codebuddy` 登录过，也可以不填 API Key。
+
+调用 WorkBuddy 自带引擎依赖它当前的安装结构，WorkBuddy 大版本更新后如果识别不到，可以在设置里填写 `codebuddy` 命令的路径，或单独安装 CodeBuddy 命令行。
 
 ## 权限（输入框右下角）
 

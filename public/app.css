@@ -77,8 +77,8 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 .local-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--hover); text-align: left; width: 100%; }
 .local-card:hover { background: var(--active); }
 .local-card .sub { font-size: 12.5px; color: var(--muted); }
-.local-card .st { display: flex; gap: 6px; margin-top: 2px; }
-.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.local-card .st { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
 .badge.on::before { background: var(--ok); }
 
@@ -210,6 +210,7 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 .notice { color: var(--muted); font-size: 13.5px; margin: 8px 0; }
 .error-box { border: 1px solid #f1c7c2; background: #fdf3f2; color: var(--err); border-radius: 10px; padding: 10px 14px; margin: 8px 0; white-space: pre-wrap; font-size: 14px; }
 @media (prefers-color-scheme: dark) { .error-box { background: #3a201d; border-color: #6a2f28; color: #f3a69c; } }
+.error-box a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
 /* Markdown */
 .md { word-break: break-word; }

@@ -115,8 +115,13 @@ function backendOptions() {
     groups.push({ backend: 'claude', label: 'Claude Code', sub: '本机 CLI', ok: clis.claude?.found,
       models: ['', ...config.claude.models] });
   }
+  if (config.codebuddy.enabled !== false) {
+    groups.push({ backend: 'codebuddy', label: 'WorkBuddy', ok: clis.codebuddy?.found,
+      sub: clis.codebuddy?.source === 'workbuddy' ? 'WorkBuddy 内置引擎' : '本机 CLI',
+      models: ['', ...config.codebuddy.models] });
+  }
   if (config.codex.enabled !== false) {
-    groups.push({ backend: 'codex', label: 'Codex', sub: '本机 CLI', ok: clis.codex?.found,
+    groups.push({ backend: 'codex', label: 'Codex', sub: clis.codex?.source === 'chatgpt' ? 'ChatGPT 内置' : '本机 CLI', ok: clis.codex?.found,
       models: ['', ...config.codex.models] });
   }
   for (const p of config.providers) {
@@ -141,7 +146,7 @@ function ensureSel() {
 const isApiBackend = (b) => String(b).startsWith('api:');
 function backendLabel(backend, model) {
   const g = backendOptions().find((x) => x.backend === backend);
-  const name = g ? g.label : backend === 'claude' ? 'Claude Code' : backend === 'codex' ? 'Codex' : '已删除的 API';
+  const name = g ? g.label : { claude: 'Claude Code', codex: 'Codex', codebuddy: 'WorkBuddy' }[backend] || '已删除的 API';
   return model ? `${name} · ${model}` : name;
 }
 const PERMS = {
@@ -295,6 +300,7 @@ function renderSidebar() {
           <div class="st">
             <span class="badge${clis.claude?.found ? ' on' : ''}">Claude Code</span>
             <span class="badge${clis.codex?.found ? ' on' : ''}">Codex</span>
+            <span class="badge${clis.codebuddy?.found ? ' on' : ''}">WorkBuddy</span>
             <span class="badge${apiCount ? ' on' : ''}">API ${apiCount || ''}</span>
           </div>
         </div>
@@ -619,6 +625,9 @@ function partsHTML(parts, live) {
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
     if (p.type === 'text') {
+      // 引擎把失败原因当作回复输出、紧接着又报同样的错误时，只在错误框里显示一次
+      const next = parts[i + 1];
+      if (next?.type === 'error' && p.text.trim() && next.text.startsWith(p.text.trim())) continue;
       html += `<div class="md${live && i === parts.length - 1 ? ' caret' : ''}">${renderMarkdown(p.text)}</div>`;
     } else if (p.type === 'tool') {
       const group = [p];
@@ -632,7 +641,8 @@ function partsHTML(parts, live) {
     } else if (p.type === 'notice') {
       html += `<div class="notice">${esc(p.text)}</div>`;
     } else if (p.type === 'error') {
-      html += `<div class="error-box">${esc(p.text)}</div>`;
+      const linked = esc(p.text).replace(/https?:\/\/[^\s<）)]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+      html += `<div class="error-box">${linked}</div>`;
     }
   }
   return html;
@@ -910,12 +920,14 @@ const PRESETS = [
   { name: '自定义', type: 'openai', baseUrl: '', models: '' },
 ];
 
-function cliCardHTML(key, title, desc, envHint) {
+const SOURCE_NAMES = { workbuddy: 'WorkBuddy 内置引擎 ', chatgpt: 'ChatGPT 内置 ' };
+
+function cliCardHTML(key, title, desc, envHint, extraHTML = '') {
   const cfg = S.data.config[key];
   const st = S.data.clis[key] || {};
   return `<div class="card" data-cli="${key}">
     <div class="card-head"><span class="ttl">${title}</span>
-      <span class="pill ${st.found ? 'ok' : 'bad'}">${st.found ? '已检测到 ' + esc(st.version || '') : '未检测到'}</span>
+      <span class="pill ${st.found ? 'ok' : 'bad'}">${st.found ? '已检测到 ' + esc((SOURCE_NAMES[st.source] || '') + (st.version || '')) : '未检测到'}</span>
       <span class="grow"></span>
       <label class="switch"><input type="checkbox" name="enabled"${cfg.enabled !== false ? ' checked' : ''}>显示在模型列表</label></div>
     <p class="lead" style="margin:0 0 12px;font-size:13.5px">${desc}${st.path ? `<br><span class="mono-path">${esc(st.path)}</span>` : ''}</p>
@@ -923,12 +935,23 @@ function cliCardHTML(key, title, desc, envHint) {
       <label class="field"><span>命令路径（可选）</span><input class="input mono" name="bin" value="${esc(cfg.bin)}" placeholder="留空自动查找"></label>
       <label class="field"><span>可选模型（逗号分隔）</span><input class="input" name="models" value="${esc(cfg.models.join(', '))}" placeholder="留空则只用 CLI 默认模型"></label>
     </div>
+    ${extraHTML}
     <label class="field"><span>额外环境变量（每行一个 KEY=VALUE，可让 CLI 使用你自己的 API）</span>
       <textarea class="textarea mono" name="env" rows="3" placeholder="${esc(envHint)}">${esc(cfg.env)}</textarea></label>
     <div class="btn-row"><button class="btn primary small" data-act="save-cli" data-key="${key}">保存</button>
       <button class="btn small" data-act="test-backend" data-backend="${key}">测试连接</button>
       <span class="test-out" data-out="${key}"></span></div>
   </div>`;
+}
+
+function codebuddyFieldsHTML() {
+  const cfg = S.data.config.codebuddy;
+  return `<div class="grid2">
+      <label class="field"><span>CodeBuddy API Key</span><input class="input mono" name="apiKey" value="${esc(cfg.apiKey)}" placeholder="在 CodeBuddy 官网创建" autocomplete="off"></label>
+      <label class="field"><span>账号版本</span><select class="select" name="region">
+        <option value="cn"${cfg.region !== 'intl' ? ' selected' : ''}>中国版（workbuddy.cn / codebuddy.cn）</option>
+        <option value="intl"${cfg.region === 'intl' ? ' selected' : ''}>国际版（workbuddy.ai / codebuddy.ai）</option></select></label>
+    </div>`;
 }
 
 function providerCardHTML(p) {
@@ -956,11 +979,16 @@ function settingsHTML() {
   const { config, dataDir } = S.data;
   return `<div class="page"><div class="page-inner">
     <h1>模型与连接</h1>
-    <p class="lead">不需要登录账号。优先使用本机已安装并登录好的 Claude Code / Codex（能读写本地文件、执行多步任务）；也可以填自己的 API Key（纯对话）。</p>
+    <p class="lead">不需要注册律台账号。优先使用本机的 Claude Code、Codex 或 WorkBuddy（能读写本地文件、执行多步任务），没单独装命令行工具时会自动使用桌面 App 自带的引擎；也可以填自己的 API Key（纯对话）。</p>
     <h2>本机命令行智能体</h2>
     ${cliCardHTML('claude', 'Claude Code', '调用 <code>claude -p</code>。沿用你在终端里的登录状态和 ~/.claude 配置。',
       'ANTHROPIC_BASE_URL=https://your-proxy.example.com\nANTHROPIC_AUTH_TOKEN=sk-…\nANTHROPIC_MODEL=…')}
-    ${cliCardHTML('codex', 'Codex', '调用 <code>codex exec</code>。沿用 ~/.codex 的登录状态和 config.toml。', 'OPENAI_API_KEY=sk-…\nOPENAI_BASE_URL=https://…')}
+    ${cliCardHTML('codex', 'Codex', '调用 <code>codex exec</code>。沿用 ~/.codex 的登录状态和 config.toml；没单独安装时，会自动使用 ChatGPT 桌面版（macOS）里自带的 Codex。', 'OPENAI_API_KEY=sk-…\nOPENAI_BASE_URL=https://…')}
+    ${cliCardHTML('codebuddy', 'WorkBuddy',
+      '装了 WorkBuddy 桌面版就能用，不需要另装命令行工具：律台会直接调用 WorkBuddy 自带的 CodeBuddy 引擎（也支持单独安装的 <code>codebuddy</code> 命令）。' +
+      '<br>WorkBuddy 桌面版的登录状态不能共用，需要填一个 CodeBuddy API Key：用你的 WorkBuddy 账号登录 CodeBuddy 官网创建，' +
+      '<a href="https://www.codebuddy.cn/docs/cli/iam" target="_blank" rel="noopener">查看官方说明</a>。',
+      'CODEBUDDY_BASE_URL=https://…（使用第三方模型服务时）', codebuddyFieldsHTML())}
     <h2>自有 API</h2>
     ${config.providers.map(providerCardHTML).join('') || '<p class="lead" style="margin-bottom:12px">还没有添加。</p>'}
     <div class="btn-row"><select class="select" id="preset" style="width:auto">${PRESETS.map((p, i) => `<option value="${i}">${p.name}</option>`).join('')}</select>
@@ -1126,7 +1154,7 @@ function modelMenu(anchor) {
     html += `<div class="grp"><span>${esc(g.label)}</span><span>${g.isApi ? g.sub : g.ok ? g.sub : '未检测到'}</span></div>`;
     html += g.models.map((m) => mi(g.backend + '|' + m, m || '默认模型', {
       checked: S.sel.backend === g.backend && (S.sel.model || '') === m, disabled: !g.ok,
-      desc: !m && g.backend === 'claude' ? '使用 Claude Code 当前设置的模型' : !m && g.backend === 'codex' ? '使用 ~/.codex/config.toml 的模型' : '',
+      desc: m ? '' : { claude: '使用 Claude Code 当前设置的模型', codex: '使用 ~/.codex/config.toml 的模型', codebuddy: 'CodeBuddy 自动选择（auto）' }[g.backend] || '',
     })).join('');
     if (g.isApi && !g.models.length) html += mi('settings', '未填写模型，去设置', { ic: 'plug' });
   }
@@ -1272,7 +1300,8 @@ document.addEventListener('click', async (e) => {
     case 'save-cli': {
       const key = el.dataset.key;
       const f = readCard(el.closest('.card'));
-      await saveConfig({ ...S.data.config, [key]: { ...S.data.config[key], enabled: f.enabled, bin: f.bin.trim(), models: splitList(f.models), env: f.env } });
+      const extra = key === 'codebuddy' ? { apiKey: f.apiKey, region: f.region } : {};
+      await saveConfig({ ...S.data.config, [key]: { ...S.data.config[key], enabled: f.enabled, bin: f.bin.trim(), models: splitList(f.models), env: f.env, ...extra } });
       renderMain();
       toast('已保存');
       break;

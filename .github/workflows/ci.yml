@@ -20,13 +20,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # 用 npm 全局安装两个 CLI：在 Windows 上会生成 .cmd 包装脚本，正好验证检测和调用逻辑
-      - name: 安装 Claude Code 与 Codex CLI
-        run: npm install -g @anthropic-ai/claude-code @openai/codex
+      # 用 npm 全局安装三个 CLI：在 Windows 上会生成 .cmd 包装脚本，正好验证检测和调用逻辑
+      - name: 安装 Claude Code、Codex 与 CodeBuddy CLI
+        run: npm install -g @anthropic-ai/claude-code @openai/codex @tencent-ai/codebuddy-code
+      # WorkBuddy 桌面版无法在 CI 里安装：按它在 Windows 上的安装结构
+      # （%LOCALAPPDATA%\Programs\WorkBuddy\WorkBuddy.exe + resources\app.asar.unpacked\cli）
+      # 用 node.exe 和官方 CodeBuddy 包搭一个替身，验证查找与启动逻辑
+      - name: 模拟 Windows 上的 WorkBuddy 安装目录
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dst = Join-Path $env:LOCALAPPDATA 'Programs\WorkBuddy'
+          New-Item -ItemType Directory -Force -Path (Join-Path $dst 'resources\app.asar.unpacked') | Out-Null
+          Copy-Item (Get-Command node).Source (Join-Path $dst 'WorkBuddy.exe')
+          $pkg = Join-Path (npm root -g) '@tencent-ai\codebuddy-code'
+          New-Item -ItemType Junction -Path (Join-Path $dst 'resources\app.asar.unpacked\cli') -Target $pkg | Out-Null
+          "EXPECT_WORKBUDDY=1" >> $env:GITHUB_ENV
       - name: 冒烟测试
         run: npm test
         env:
-          EXPECT_CLIS: '1'
+          EXPECT_CLIS: claude,codex,codebuddy
           TEST_CLI_CALLS: '1'
 
   windows:

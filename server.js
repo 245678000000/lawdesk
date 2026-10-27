@@ -7,7 +7,7 @@ import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as store from './lib/store.js';
 import { BASE_PROMPT, EXAMPLES } from './lib/skills.js';
-import { runClaude, runCodex, detectCli, shellEnvReady } from './lib/cli.js';
+import { runClaude, runCodex, runCodeBuddy, detectCli, shellEnvReady } from './lib/cli.js';
 import { runOpenAI, runAnthropic } from './lib/api.js';
 import { extractText } from './lib/extract.js';
 
@@ -33,11 +33,11 @@ function applyEvent(parts, ev) {
   }
 }
 
-const CLIS = { claude: null, codex: null };
+const CLIS = { claude: null, codex: null, codebuddy: null };
+const CLI_BACKENDS = ['claude', 'codex', 'codebuddy'];
 function refreshClis() {
   const cfg = store.getConfig();
-  CLIS.claude = detectCli('claude', cfg.claude.bin);
-  CLIS.codex = detectCli('codex', cfg.codex.bin);
+  for (const k of CLI_BACKENDS) CLIS[k] = detectCli(k, cfg[k]);
 }
 
 // ---------------- 组装提示词 ----------------
@@ -154,7 +154,7 @@ async function startChat(body) {
     let result = {};
     let error = null;
     try {
-      if (backend === 'claude' || backend === 'codex') {
+      if (CLI_BACKENDS.includes(backend)) {
         const cwd = project?.folder || ws;
         const addDirs = project?.folder ? [ws] : [];
         const sess = conv.sessions?.[backend];
@@ -164,8 +164,9 @@ async function startChat(body) {
         if (!resume && prior.length) {
           prompt = `以下是本对话此前的记录，供你了解上下文：\n\n${transcriptOf(prior)}\n\n——以上为历史记录——\n\n现在用户的新消息：\n${prompt}`;
         }
-        if (backend === 'claude') {
-          result = await runClaude({ prompt, systemPrompt, cwd, addDirs, sessionId: resume, model, permission, cfg: cfg.claude },
+        if (backend === 'claude' || backend === 'codebuddy') {
+          const run = backend === 'claude' ? runClaude : runCodeBuddy;
+          result = await run({ prompt, systemPrompt, cwd, addDirs, sessionId: resume, model, permission, cfg: cfg[backend] },
             emit, job.controller.signal);
         } else {
           // Codex 没有追加系统提示的参数：新会话时把说明放在消息最前面，续聊时只带上本轮技能
@@ -405,8 +406,9 @@ async function testBackend(backend, model) {
   try {
     const dir = path.join(store.DATA_DIR, 'test');
     fs.mkdirSync(dir, { recursive: true });
-    if (backend === 'claude') {
-      await runClaude({ prompt, systemPrompt: '', cwd: dir, model, permission: 'readonly', cfg: cfg.claude }, emit, controller.signal);
+    if (backend === 'claude' || backend === 'codebuddy') {
+      const run = backend === 'claude' ? runClaude : runCodeBuddy;
+      await run({ prompt, systemPrompt: '', cwd: dir, model, permission: 'readonly', cfg: cfg[backend] }, emit, controller.signal);
     } else if (backend === 'codex') {
       await runCodex({ prompt, cwd: dir, model, permission: 'readonly', ephemeral: true, cfg: cfg.codex }, emit, controller.signal);
     } else {
@@ -481,6 +483,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  律台 · 本地法律智能体已启动：${link}`);
   console.log(`  Claude Code：${CLIS.claude.found ? CLIS.claude.version + '（' + CLIS.claude.path + '）' : '未找到'}`);
   console.log(`  Codex：${CLIS.codex.found ? CLIS.codex.version + '（' + CLIS.codex.path + '）' : '未找到'}`);
+  console.log(`  WorkBuddy：${CLIS.codebuddy.found ? CLIS.codebuddy.version + '（' + CLIS.codebuddy.path + '）' : '未找到'}`);
   console.log(`  数据目录：${store.DATA_DIR}\n  按 Ctrl+C 退出\n`);
   console.log(`LAWDESK_READY ${port}`);
   if (!process.env.NO_OPEN && process.stdout.isTTY) revealInFinder(link);
